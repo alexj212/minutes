@@ -78,13 +78,16 @@ found until whisper fails.
 **Fix:** `minutes config` to print the effective config, and `--init` to write a
 commented default.
 
-### Every step is a separate command
+### ~~Every step is a separate command~~ — mostly fixed
 
-`record` → `transcribe` → `deliver` are three invocations. For the common case
-that is three things to remember and two to forget.
+Transcription now starts by itself when a recording stops, in the background, so
+`stop` still returns in about a tenth of a second. Delivery is deliberately
+still manual: which project a meeting's notes belong to is a judgment call.
 
-**Fix:** `minutes stop --then transcribe,deliver --to <project>`, or a
-`minutes wrap` that does all three.
+**Still true:** transcription is slow. Whisper `small` on this machine's GPU runs
+at roughly **real time**, and both tracks are transcribed, so a 30-minute
+meeting occupies the GPU for about 30–45 minutes afterwards. Nothing queues
+this — stopping two meetings close together will have them competing.
 
 ### Short bleed fragments evade suppression and are misattributed to you
 
@@ -171,6 +174,20 @@ recordings checked this way — every suppressed line was a genuine echo. The on
 misattribution it produced is the gap above.
 
 This was the design's headline claim and the last thing about it taken on trust.
+
+### Loopback captures everything, and it lands in the transcript
+
+Not new, but auto-transcription makes it visible on every meeting rather than
+only when you ask. System-wide loopback takes whatever the machine is playing,
+so a video in another window becomes dialogue in the notes, attributed to
+`Others` and indistinguishable from a participant.
+
+Observed: a nine-second test recording produced four lines, two of which came
+from unrelated audio playing at the time. There is nothing in the transcript to
+say which is which.
+
+Process-specific loopback (section 3) is the real fix. Until then, the
+transcript of a meeting is the transcript of the machine.
 
 ## 4. Claimed but not verified
 

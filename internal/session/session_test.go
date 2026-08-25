@@ -2,6 +2,7 @@ package session
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -195,5 +196,93 @@ func TestStopWithoutASupervisorRefuses(t *testing.T) {
 	dir := fixture(t, root, "2026-08-25-100000", manifest.StateStopped, "")
 	if _, err := Stop(dir, time.Second); err != ErrNotRecording {
 		t.Errorf("Stop returned %v, want ErrNotRecording", err)
+	}
+}
+
+// Stop waits for capture to finish, not for the supervisor to exit.
+//
+// The supervisor carries on into transcription, which runs at about real time,
+// so waiting for the process would hang the terminal for the length of the
+// meeting.
+func TestStopReturnsWhenCaptureEndsNotWhenTheProcessExits(t *testing.T) {
+	root := t.TempDir()
+
+	// A real child standing in for a supervisor that is still alive and busy
+	// transcribing. It ignores SIGTERM, because Stop signals it and the point
+	// of the test is that Stop returns while it is still running.
+	//
+	// Not this process's own pid: Stop would then signal the test runner, which
+	// is how the first version of this test terminated itself.
+	child := exec.Command("sh", "-c", `trap "" TERM; sleep 30`)
+	if err := child.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = child.Process.Kill(); _, _ = child.Process.Wait() })
+
+	dir := fixture(t, root, "2026-08-25-100000", manifest.StateRecording, itoa(child.Process.Pid))
+
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		m, err := manifest.Load(dir)
+		if err != nil {
+			return
+		}
+		_ = m.SetState(manifest.StateTranscribing)
+	}()
+
+	done := make(chan *manifest.Manifest, 1)
+	go func() {
+		m, err := Stop(dir, 5*time.Second)
+		if err != nil {
+			done <- nil
+			return
+		}
+		done <- m
+	}()
+
+	select {
+	case m := <-done:
+		if m == nil {
+			t.Fatal("Stop returned an error while the supervisor was still alive")
+		}
+		if m.State != manifest.StateTranscribing {
+			t.Errorf("Stop returned in state %q, want %q", m.State, manifest.StateTranscribing)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Stop waited for the process to exit; it should return once capture is done")
+	}
+
+	// The supervisor must still be alive: if Stop only returned because the
+	// process died, the test proves nothing about waiting on state.
+	if _, alive := PID(dir); !alive {
+		t.Error("the stand-in supervisor died, so Stop may have returned for the wrong reason")
+	}
+}
+
+// A supervisor that died partway through a transcript leaves a manifest saying
+// it is still working, and that has to read as interrupted too — the audio is
+// safe, but nothing is going to finish the transcript.
+func TestInterruptedCoversTranscribing(t *testing.T) {
+	root := t.TempDir()
+	dir := fixture(t, root, "2026-08-25-100000", manifest.StateTranscribing, "4194304")
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !st.Interrupted() {
+		t.Error("a dead supervisor mid-transcript was not reported interrupted")
+	}
+}
+
+// A supervisor that is genuinely still transcribing is not interrupted.
+func TestLiveTranscribingIsNotInterrupted(t *testing.T) {
+	root := t.TempDir()
+	dir := fixture(t, root, "2026-08-25-100000", manifest.StateTranscribing, itoa(os.Getpid()))
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Interrupted() {
+		t.Error("a live transcription was reported interrupted")
 	}
 }

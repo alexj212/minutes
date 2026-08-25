@@ -110,6 +110,19 @@ Stopping is a request, not a kill: the helper finishes the packet in hand,
 closes its segments and writes the final manifest. That takes a moment and is
 worth it.
 
+**Transcription then starts by itself, in the background.** `stop` returns as
+soon as the audio is safe on disk — measured at about a tenth of a second — and
+the supervisor carries on transcribing. `minutes list` shows the recording as
+`transcribing` until it is done.
+
+It runs in the background rather than in `stop` because whisper on this machine
+manages roughly **real time**, and both tracks are transcribed: a 30-minute
+meeting is an hour of audio and takes about that long. Blocking `stop` on it
+would hang the terminal for the length of the meeting.
+
+Turn it off with `"afterStop": false` under `transcription` in the config, and
+run `minutes transcribe` by hand instead.
+
 ### The other way: record in the foreground
 
 ```
@@ -226,6 +239,7 @@ Configure at `~/.config/minutes/config.json` (override the path with
 | `model` | Whisper size locally (`tiny`…`large-v3`), or an API model name. |
 | `language` | Skips language detection. Leave empty to detect. |
 | `device` | `cuda` or `cpu`, local only. |
+| `afterStop` | Transcribe automatically in the background when a recording stops. Default `true`. |
 | `baseUrl` | Points a hosted backend at anything OpenAI-compatible. |
 | `apiKeyEnv` | *Name of* the environment variable holding the key — never the key itself, because a config file gets copied, committed and pasted into bug reports. |
 
@@ -284,9 +298,9 @@ to open it means already being you.
 ```
 minutes preflight                        # before it starts
 minutes start --name "vendor call"       # when it starts
-minutes stop                             # when it ends
-minutes transcribe
-minutes deliver --to homelab
+minutes stop                             # when it ends — transcription starts itself
+minutes list                             # until it stops saying "transcribing"
+minutes deliver --to homelab             # where the notes belong is still your call
 ```
 
 ---
@@ -338,6 +352,10 @@ is simply shorter than the meeting was.
 the system track it usually means nothing was playing, or the meeting is on an
 output that is not the Windows default endpoint. Check `minutes preflight`
 against the device the meeting is actually on.
+
+**`status` says `interrupted` while transcribing.** The supervisor died partway
+through the transcript. The audio is complete and safe — only the transcript is
+missing, and `minutes transcribe` will produce it.
 
 **`status` says `interrupted`.** The supervisor died without stopping cleanly.
 Every completed segment is intact, the manifest is valid, and the in-progress

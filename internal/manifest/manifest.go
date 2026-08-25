@@ -39,7 +39,11 @@ const (
 	// directory. It is also the honest answer to "is this machine recording
 	// right now".
 	StateRecording State = "recording"
-	StateStopped   State = "stopped"
+	// StateTranscribing means capture has finished and the supervisor is still
+	// working. The audio is complete and safe at this point; only the
+	// transcript is outstanding.
+	StateTranscribing State = "transcribing"
+	StateStopped      State = "stopped"
 	// StateFailed means the recording ended for a reason other than being
 	// asked to. Whatever segments completed are still listed and still good.
 	StateFailed State = "failed"
@@ -282,6 +286,14 @@ type DeliveryRecord struct {
 	// Degraded means the agent was unreachable and the brief was written to
 	// disk instead. It is not the same as delivered, and should not look it.
 	Degraded bool `json:"degraded,omitempty"`
+}
+
+// SetState moves the recording to a new state, and saves.
+func (m *Manifest) SetState(st State) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.State = st
+	return m.saveLocked()
 }
 
 // SetDelivery records where the notes went, and saves.

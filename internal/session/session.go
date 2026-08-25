@@ -148,8 +148,17 @@ func Stop(dir string, timeout time.Duration) (*manifest.Manifest, error) {
 		return nil, fmt.Errorf("signalling supervisor %d: %w", pid, err)
 	}
 
+	// Waits for capture to finish, not for the supervisor to exit.
+	//
+	// The supervisor carries on into transcription, which runs at about
+	// real time — so waiting for the process would hang the terminal for the
+	// length of the meeting. Once the state leaves "recording" the audio is
+	// complete on disk and there is nothing left to wait for.
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
+		if m, err := manifest.Load(dir); err == nil && m.State != manifest.StateRecording {
+			return m, nil
+		}
 		if _, alive := PID(dir); !alive {
 			return manifest.Load(dir)
 		}
@@ -168,9 +177,17 @@ type Status struct {
 	Live bool
 }
 
-// Interrupted reports a recording that claims to be running but is not.
+// Interrupted reports a recording that claims to be working but is not.
+//
+// Covers transcribing as well as recording: a supervisor that died partway
+// through a transcript leaves a manifest saying it is still going, and the fix
+// differs — an interrupted recording is as long as it is, while an interrupted
+// transcript can simply be run again.
 func (s Status) Interrupted() bool {
-	return s.State == manifest.StateRecording && !s.Live
+	if s.Live {
+		return false
+	}
+	return s.State == manifest.StateRecording || s.State == manifest.StateTranscribing
 }
 
 // StateLabel is the honest one-word state, reconciling the manifest against

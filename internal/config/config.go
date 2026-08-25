@@ -28,6 +28,11 @@ type Transcription struct {
 	Device string `json:"device,omitempty"`
 	// BaseURL points a hosted backend somewhere OpenAI-compatible.
 	BaseURL string `json:"baseUrl,omitempty"`
+	// AfterStop transcribes automatically once a recording stops, in the
+	// background. On by default: forgetting the second command is the common
+	// case, and the supervisor is already detached so it costs nothing to wait
+	// on.
+	AfterStop bool `json:"afterStop"`
 	// APIKeyEnv names the environment variable holding the key. The key itself
 	// is deliberately not storable here: a config file gets copied, committed
 	// and pasted into bug reports.
@@ -54,10 +59,11 @@ func Path() string {
 // Default is what runs when nobody has said otherwise: everything stays here.
 func Default() *Config {
 	return &Config{Transcription: Transcription{
-		Backend:  transcribe.BackendLocalWhisper,
-		Model:    "small",
-		Language: "en",
-		Device:   "cuda",
+		Backend:   transcribe.BackendLocalWhisper,
+		Model:     "small",
+		Language:  "en",
+		Device:    "cuda",
+		AfterStop: true,
 	}}
 }
 

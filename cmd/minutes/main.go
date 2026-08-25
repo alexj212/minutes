@@ -284,7 +284,26 @@ func cmdStop(args []string) int {
 	}
 	fmt.Println("  ○ stopped")
 	fmt.Println()
-	return report(m, true)
+	rc := report(m, true)
+	if m.State == manifest.StateTranscribing {
+		fmt.Printf("\n  transcribing in the background — `minutes list` shows when it is done.\n")
+		fmt.Printf("  at roughly real time, expect about %s.\n", roughly(m.Duration()*2))
+	}
+	return rc
+}
+
+// roughly renders how long transcription will take. Whisper on this machine
+// runs at about real time, and both tracks are transcribed, so a meeting costs
+// roughly twice its own length.
+func roughly(seconds float64) string {
+	switch {
+	case seconds < 90:
+		return "a minute"
+	case seconds < 3600:
+		return fmt.Sprintf("%.0f minutes", seconds/60)
+	default:
+		return fmt.Sprintf("%.1f hours", seconds/3600)
+	}
 }
 
 func cmdStatus(args []string) int {
@@ -550,15 +569,14 @@ func cmdTranscribe(args []string) int {
 		return 1
 	}
 	log := func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
-	opt := cfg.TranscribeOptions(log)
 	if *backend != "" {
-		opt.Backend = *backend
+		cfg.Transcription.Backend = *backend
 	}
 	if *model != "" {
-		opt.Model = *model
+		cfg.Transcription.Model = *model
 	}
 
-	tr, err := transcribe.New(opt)
+	tr, err := transcribe.New(cfg.TranscribeOptions(log))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -576,23 +594,13 @@ func cmdTranscribe(args []string) int {
 	defer stop()
 
 	started := time.Now()
-	t, err := transcript.Build(ctx, st.Manifest, tr, log)
-	if err != nil {
+	if err := transcribeInto(ctx, st.Manifest, cfg, log); err != nil {
 		fmt.Fprintf(os.Stderr, "transcription failed: %v\n", err)
 		return 1
 	}
-	if err := t.Write(dir); err != nil {
-		fmt.Fprintf(os.Stderr, "writing transcript: %v\n", err)
-		return 1
-	}
-	if err := st.Manifest.SetTranscript(manifest.TranscriptRecord{
-		Backend:          t.Backend,
-		AudioLeftMachine: t.AudioLeftMachine,
-		CreatedAt:        t.CreatedAt,
-		Lines:            len(t.Lines),
-		File:             transcript.JSONName,
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "recording the transcript in the manifest: %v\n", err)
+	t, err := transcript.Load(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
 	}
 
@@ -719,18 +727,66 @@ func cmdSupervise(args []string) int {
 		Helper: *helper, Manifest: m,
 		Log: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
 	})
-	if err := m.Finish(runErr); err != nil {
+	if runErr != nil {
+		if err := m.Finish(runErr); err != nil {
+			fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
+		}
+		os.Remove(filepath.Join(*dir, session.PIDFile))
+		fmt.Fprintf(os.Stderr, "recording failed: %v\n", runErr)
+		return 1
+	}
+
+	// Capture is done and the audio is safe. Anything after this point can fail
+	// without costing the meeting.
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		fmt.Fprintf(os.Stderr, "config unreadable, not transcribing: %v\n", cfgErr)
+	} else if cfg.Transcription.AfterStop {
+		// The state moves before the work starts, because `stop` is waiting for
+		// it: it returns as soon as capture is complete rather than waiting out
+		// a transcript that runs at about real time.
+		if err := m.SetState(manifest.StateTranscribing); err != nil {
+			fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
+		}
+		if err := transcribeInto(context.Background(), m, cfg,
+			func(f string, a ...any) { fmt.Printf(f+"\n", a...) }); err != nil {
+			// A failed transcript is not a failed recording. The audio is on
+			// disk and `minutes transcribe` can be run again.
+			fmt.Fprintf(os.Stderr, "transcription failed (the recording is intact): %v\n", err)
+		}
+	}
+
+	if err := m.Finish(nil); err != nil {
 		fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
 	}
 	// The pid file is removed last: while it exists and names a live process,
 	// `stop` has something to signal.
 	os.Remove(filepath.Join(*dir, session.PIDFile))
-	if runErr != nil {
-		fmt.Fprintf(os.Stderr, "recording failed: %v\n", runErr)
-		return 1
-	}
 	fmt.Println("stopped cleanly")
 	return 0
+}
+
+// transcribeInto transcribes a recording and records the result. Shared by the
+// supervisor and the `transcribe` command so the two cannot drift.
+func transcribeInto(ctx context.Context, m *manifest.Manifest, cfg *config.Config, log func(string, ...any)) error {
+	tr, err := transcribe.New(cfg.TranscribeOptions(log))
+	if err != nil {
+		return err
+	}
+	t, err := transcript.Build(ctx, m, tr, log)
+	if err != nil {
+		return err
+	}
+	if err := t.Write(m.Dir()); err != nil {
+		return err
+	}
+	return m.SetTranscript(manifest.TranscriptRecord{
+		Backend:          t.Backend,
+		AudioLeftMachine: t.AudioLeftMachine,
+		CreatedAt:        t.CreatedAt,
+		Lines:            len(t.Lines),
+		File:             transcript.JSONName,
+	})
 }
 
 // first returns the first element, or "" — the commands take an optional id.
