@@ -44,6 +44,30 @@ func defaultRoot() string {
 	return filepath.Join(home, "minutes")
 }
 
+// parseFlags parses args that mix flags and positionals in any order, and
+// returns the positionals.
+//
+// Go's flag package stops at the first non-flag argument, so
+// `minutes transcribe <id> --model small` would take "--model" and "small" as
+// two more recording ids and silently transcribe with the default model. Every
+// command here takes an optional id followed by flags, which is exactly the
+// shape that breaks.
+func parseFlags(fs *flag.FlagSet, args []string) []string {
+	var positional []string
+	rest := args
+	for {
+		if err := fs.Parse(rest); err != nil {
+			os.Exit(2)
+		}
+		rest = fs.Args()
+		if len(rest) == 0 {
+			return positional
+		}
+		positional = append(positional, rest[0])
+		rest = rest[1:]
+	}
+}
+
 func usage() {
 	fmt.Fprint(os.Stderr, `minutes — record both sides of a meeting
 
@@ -63,7 +87,11 @@ func usage() {
         Show a recording's manifest.
 
   minutes list [--root DIR]
-        List recordings, newest first.
+        List recordings, newest first, with size, transcript and delivery.
+
+  minutes rm [ID...] [--older-than D] [--undelivered] [--force]
+        Remove recordings. Refuses to remove ones whose notes were never
+        delivered unless told otherwise.
 
   minutes record [--duration D] [--name NAME] [--segment 5m] [--root DIR]
         Record in the foreground until the duration elapses or Ctrl-C.
@@ -107,6 +135,8 @@ func main() {
 		os.Exit(cmdTranscribe(args))
 	case "deliver":
 		os.Exit(cmdDeliver(args))
+	case "rm":
+		os.Exit(cmdRemove(args))
 	case "supervise":
 		os.Exit(cmdSupervise(args))
 	case "-h", "--help", "help":
@@ -205,7 +235,7 @@ func cmdStart(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "start even if another recording is running")
-	fs.Parse(args)
+	parseFlags(fs, args)
 
 	helper := readyToRecord(context.Background(), *root, *force)
 	if helper == "" {
@@ -240,9 +270,9 @@ func banner() {
 func cmdStop(args []string) int {
 	fs := flag.NewFlagSet("stop", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
-	fs.Parse(args)
+	ids := parseFlags(fs, args)
 
-	dir, err := session.Resolve(*root, fs.Arg(0))
+	dir, err := session.Resolve(*root, first(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -260,9 +290,9 @@ func cmdStop(args []string) int {
 func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
-	fs.Parse(args)
+	ids := parseFlags(fs, args)
 
-	dir, err := session.Resolve(*root, fs.Arg(0))
+	dir, err := session.Resolve(*root, first(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -297,7 +327,7 @@ func cmdStatus(args []string) int {
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
-	fs.Parse(args)
+	parseFlags(fs, args)
 
 	all, err := session.List(*root)
 	if err != nil {
@@ -308,14 +338,133 @@ func cmdList(args []string) int {
 		fmt.Printf("no recordings under %s\n", *root)
 		return 0
 	}
+
+	fmt.Printf("  %-28s %-12s %8s %8s  %-12s %s\n",
+		"ID", "STATE", "LENGTH", "SIZE", "TRANSCRIPT", "DELIVERED")
+
+	var total int64
 	for _, st := range all {
 		mark := " "
 		if st.Live {
 			mark = "●" // an active recording is visible in a plain listing
 		}
-		fmt.Printf("%s %-28s %-12s %7.1fs  %s\n",
-			mark, st.ID, st.StateLabel(), st.Duration(), st.Name)
+		size, _ := session.DirSize(st.Dir())
+		total += size
+
+		transcribed := "—"
+		if t := st.Transcript; t != nil {
+			transcribed = fmt.Sprintf("%d lines", t.Lines)
+			if t.AudioLeftMachine {
+				// Worth seeing at a glance which meetings left the machine.
+				transcribed += " ↑"
+			}
+		}
+		delivered := "—"
+		if d := st.Delivery; d != nil {
+			delivered = d.To
+			if d.Degraded {
+				delivered += " (on disk only)"
+			}
+		}
+
+		fmt.Printf("%s %-28s %-12s %7.1fs %8s  %-12s %s\n",
+			mark, st.ID, st.StateLabel(), st.Duration(),
+			session.HumanBytes(size), transcribed, delivered)
+		if st.Name != "" && st.Name != st.ID {
+			fmt.Printf("  %-28s %s\n", "", st.Name)
+		}
 	}
+	fmt.Printf("\n  %d recording(s), %s in %s\n", len(all), session.HumanBytes(total), *root)
+	for _, st := range all {
+		if st.Transcript != nil && st.Transcript.AudioLeftMachine {
+			fmt.Printf("  ↑ marks a meeting whose audio was sent off this machine.\n")
+			break
+		}
+	}
+	return 0
+}
+
+func cmdRemove(args []string) int {
+	fs := flag.NewFlagSet("rm", flag.ExitOnError)
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
+	olderThan := fs.Duration("older-than", 0, "also remove anything older than this")
+	force := fs.Bool("force", false, "do not ask")
+	undelivered := fs.Bool("undelivered", false, "allow removing recordings whose notes were never delivered")
+	ids := parseFlags(fs, args)
+
+	all, err := session.List(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+
+	wanted := map[string]bool{}
+	for _, id := range ids {
+		wanted[id] = true
+	}
+
+	var doomed []session.Status
+	for _, st := range all {
+		switch {
+		case wanted[st.ID]:
+		case *olderThan > 0 && time.Since(st.StartedAt) > *olderThan:
+		default:
+			continue
+		}
+		if st.Live {
+			// Deleting the directory out from under a running supervisor would
+			// leave it writing into nothing.
+			fmt.Fprintf(os.Stderr, "%s is still recording; stop it first.\n", st.ID)
+			return 1
+		}
+		doomed = append(doomed, st)
+	}
+
+	if len(doomed) == 0 {
+		fmt.Println("nothing matched")
+		return 0
+	}
+
+	var total int64
+	fmt.Println("Would remove:")
+	blocked := 0
+	for _, st := range doomed {
+		size, _ := session.DirSize(st.Dir())
+		total += size
+		note := ""
+		if st.Delivery == nil {
+			// The notes were never sent anywhere, so deleting this loses the
+			// only copy of a meeting nobody has read.
+			note = "  ← never delivered"
+			blocked++
+		}
+		fmt.Printf("  %-28s %8s%s\n", st.ID, session.HumanBytes(size), note)
+	}
+	fmt.Printf("  %s total\n", session.HumanBytes(total))
+
+	if blocked > 0 && !*undelivered {
+		fmt.Fprintf(os.Stderr, "\n%d of these were never delivered, so deleting them loses the only\n", blocked)
+		fmt.Fprintln(os.Stderr, "copy of a meeting nobody has read. Pass --undelivered if that is fine.")
+		return 1
+	}
+
+	if !*force {
+		fmt.Print("\nRemove these? [y/N] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("nothing removed")
+			return 0
+		}
+	}
+	for _, st := range doomed {
+		if err := os.RemoveAll(st.Dir()); err != nil {
+			fmt.Fprintf(os.Stderr, "removing %s: %v\n", st.ID, err)
+			return 1
+		}
+		fmt.Printf("  removed %s\n", st.ID)
+	}
+	fmt.Printf("  %s freed\n", session.HumanBytes(total))
 	return 0
 }
 
@@ -326,7 +475,7 @@ func cmdRecord(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "record even if another recording is running")
-	fs.Parse(args)
+	parseFlags(fs, args)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -378,9 +527,9 @@ func cmdTranscribe(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	backend := fs.String("backend", "", "override the configured backend")
 	model := fs.String("model", "", "override the configured model")
-	fs.Parse(args)
+	ids := parseFlags(fs, args)
 
-	dir, err := session.Resolve(*root, fs.Arg(0))
+	dir, err := session.Resolve(*root, first(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -467,7 +616,7 @@ func cmdDeliver(args []string) int {
 	to := fs.String("to", "", "the project whose session should write the notes")
 	from := fs.String("from", "minutes", "who the message is from")
 	noNotify := fs.Bool("no-notify", false, "do not send a human notification")
-	fs.Parse(args)
+	ids := parseFlags(fs, args)
 
 	if *to == "" {
 		fmt.Fprintln(os.Stderr, "deliver needs --to: which project the notes belong to is a judgment call,")
@@ -475,7 +624,7 @@ func cmdDeliver(args []string) int {
 		return 2
 	}
 
-	dir, err := session.Resolve(*root, fs.Arg(0))
+	dir, err := session.Resolve(*root, first(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -511,6 +660,11 @@ func cmdDeliver(args []string) int {
 			fmt.Fprintf(os.Stderr, "agent unreachable, and writing the brief failed too: %v\n", werr)
 			return 1
 		}
+		if serr := m.SetDelivery(manifest.DeliveryRecord{
+			To: *to, At: time.Now(), Degraded: true,
+		}); serr != nil {
+			fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
+		}
 		fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
 		fmt.Printf("  the brief is on disk and nothing was lost:\n    %s\n", path)
 		return 0
@@ -524,6 +678,9 @@ func cmdDeliver(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "delivery failed: %v\n", err)
 		return 1
+	}
+	if serr := m.SetDelivery(manifest.DeliveryRecord{To: *to, At: time.Now()}); serr != nil {
+		fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 	}
 	fmt.Printf("  notes requested from %s\n", *to)
 
@@ -542,7 +699,7 @@ func cmdSupervise(args []string) int {
 	fs := flag.NewFlagSet("supervise", flag.ExitOnError)
 	dir := fs.String("dir", "", "recording directory")
 	helper := fs.String("helper", "", "capture helper path")
-	fs.Parse(args)
+	parseFlags(fs, args)
 	if *dir == "" || *helper == "" {
 		fmt.Fprintln(os.Stderr, "supervise needs --dir and --helper")
 		return 2
@@ -574,6 +731,14 @@ func cmdSupervise(args []string) int {
 	}
 	fmt.Println("stopped cleanly")
 	return 0
+}
+
+// first returns the first element, or "" — the commands take an optional id.
+func first(ids []string) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	return ids[0]
 }
 
 // report prints what a recording captured. When judge is set it also fails on a

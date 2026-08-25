@@ -114,3 +114,30 @@ func TestLiveOfEmptyRootIsEmpty(t *testing.T) {
 		t.Errorf("got %d live recordings from a missing root", len(live))
 	}
 }
+
+func TestDirSizeCountsEverything(t *testing.T) {
+	dir := t.TempDir()
+	for name, size := range map[string]int{"a.wav": 1000, "b.wav": 2000, "manifest.json": 50} {
+		if err := os.WriteFile(filepath.Join(dir, name), make([]byte, size), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := DirSize(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := int64(3050); got != want {
+		t.Errorf("DirSize = %d, want %d", got, want)
+	}
+}
+
+func TestHumanBytes(t *testing.T) {
+	cases := map[int64]string{
+		512: "512B", 2100: "2.1kB", 27_100_000: "27.1MB", 1_330_000_000: "1.3GB",
+	}
+	for in, want := range cases {
+		if got := HumanBytes(in); got != want {
+			t.Errorf("HumanBytes(%d) = %q, want %q", in, got, want)
+		}
+	}
+}

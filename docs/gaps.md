@@ -31,9 +31,10 @@ system track at 44.1 kHz, both stereo 16-bit. A two-hour meeting is 2.7 GB.
 `start` and `record` now estimate headroom from the rates preflight reports,
 refuse below fifteen minutes of room, and warn below two hours.
 
-**Still missing:** any retention or prune. Recordings accumulate until somebody
-deletes them, and at 1.33 GB/hour that adds up faster than it looks. A
-`minutes prune` with a keep-N or keep-days policy is the obvious next step.
+**Still missing:** automatic retention. `minutes rm` will now delete by id or
+`--older-than`, and refuses to remove anything whose notes were never delivered,
+but nothing runs it for you. At 1.33 GB/hour that still adds up faster than it
+looks.
 
 ### ~~Two recordings can run at once, silently~~ — fixed
 
@@ -208,4 +209,4 @@ What is left, in order:
    level, or system-track energy — rather than a blunter text rule that would
    delete real interjections.
 2. **Make an active recording visible outside the terminal that started it.**
-3. **`minutes prune`.** Nothing deletes anything, at 1.33 GB/hour.
+3. **Automatic retention.** `minutes rm --older-than` exists; nothing runs it.

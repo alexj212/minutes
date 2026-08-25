@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestSaveAndLoadRoundTrip(t *testing.T) {
@@ -173,5 +174,42 @@ func TestLoadRejectsCorruptManifest(t *testing.T) {
 	}
 	if _, err := Load(dir); err == nil {
 		t.Error("a corrupt manifest loaded without error")
+	}
+}
+
+// "Did I send this one?" has to be answerable from the recording rather than
+// from memory, because it is asked days later.
+func TestDeliveryIsRecorded(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, "id", "", 300)
+	if err := m.SetDelivery(DeliveryRecord{To: "homelab", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Delivery == nil || got.Delivery.To != "homelab" {
+		t.Fatalf("delivery did not survive: %+v", got.Delivery)
+	}
+	if got.Delivery.Degraded {
+		t.Error("a real delivery was recorded as degraded")
+	}
+}
+
+// Written to disk because the agent was unreachable is not the same as
+// delivered, and must not look like it in a listing.
+func TestDegradedDeliveryIsDistinguishable(t *testing.T) {
+	dir := t.TempDir()
+	m := New(dir, "id", "", 300)
+	if err := m.SetDelivery(DeliveryRecord{To: "homelab", At: time.Now(), Degraded: true}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Delivery.Degraded {
+		t.Error("a brief written to disk was recorded as a real delivery")
 	}
 }

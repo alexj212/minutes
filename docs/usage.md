@@ -119,6 +119,39 @@ $ minutes record --duration 15m --name "standup"
 Same pipeline, runs until the duration elapses or Ctrl-C. Useful when you want
 to watch it, and for testing.
 
+### Managing what you have
+
+```
+$ minutes list
+  ID                           STATE          LENGTH     SIZE  TRANSCRIPT   DELIVERED
+  2026-08-25-140144-standup    stopped         73.5s   27.1MB  312 lines    homelab
+                               standup
+  2026-08-25-093012-vendor     stopped        903.0s  334.0MB  —            —
+                               vendor call
+
+  2 recording(s), 361.1MB in /home/alexj/minutes
+```
+
+`TRANSCRIPT` is `—` until `minutes transcribe` has run, and carries a `↑` if
+that meeting's audio was sent off this machine. `DELIVERED` names the project
+its notes went to, or says `(on disk only)` if the agent was unreachable and the
+brief was written locally instead.
+
+Removing them:
+
+```
+$ minutes rm 2026-08-25-093012-vendor
+$ minutes rm --older-than 720h            # everything over 30 days
+```
+
+`rm` refuses to delete a recording whose notes were never delivered, because
+that loses the only copy of a meeting nobody has read — pass `--undelivered`
+when that is what you want. It refuses to touch a recording that is still
+running, shows what it is about to remove and how much that frees, and asks
+before doing it unless given `--force`.
+
+At **1.33 GB/hour**, this is not housekeeping you can put off indefinitely.
+
 ### While it runs
 
 ```
@@ -337,7 +370,8 @@ retry; find the loop.
 | `minutes start [--name N] [--segment 5m] [--root DIR] [--force]` | Begin recording and return. Refuses if one is running or the disk is low. |
 | `minutes stop [ID] [--root DIR]` | Stop and report. Defaults to the running one. |
 | `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
-| `minutes list [--root DIR]` | List recordings, newest first. `●` marks a live one. |
+| `minutes list [--root DIR]` | List recordings with size, transcript and delivery. `●` marks a live one. |
+| `minutes rm [ID...] [--older-than D] [--undelivered] [--force]` | Remove recordings. Refuses undelivered ones by default. |
 | `minutes record [--duration D] [--name N] [--segment 5m]` | Record in the foreground. |
 | `minutes transcribe [ID] [--backend B] [--model M]` | Transcribe and merge both tracks. |
 | `minutes deliver [ID] --to PROJECT [--no-notify]` | Hand it to a session; tell the human. |

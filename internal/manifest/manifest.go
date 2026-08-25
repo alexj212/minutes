@@ -152,6 +152,11 @@ type Manifest struct {
 	// Transcript records that this recording has been transcribed, and how.
 	Transcript *TranscriptRecord `json:"transcript,omitempty"`
 
+	// Delivery records that the notes were handed to a session. Kept so that
+	// "did I send this one?" is answerable from the recording rather than from
+	// memory.
+	Delivery *DeliveryRecord `json:"delivery,omitempty"`
+
 	// Error explains a failed state.
 	Error string `json:"error,omitempty"`
 
@@ -268,6 +273,23 @@ type TranscriptRecord struct {
 	CreatedAt        time.Time `json:"createdAt"`
 	Lines            int       `json:"lines"`
 	File             string    `json:"file"`
+}
+
+// DeliveryRecord is where a recording's notes were sent.
+type DeliveryRecord struct {
+	To string    `json:"to"`
+	At time.Time `json:"at"`
+	// Degraded means the agent was unreachable and the brief was written to
+	// disk instead. It is not the same as delivered, and should not look it.
+	Degraded bool `json:"degraded,omitempty"`
+}
+
+// SetDelivery records where the notes went, and saves.
+func (m *Manifest) SetDelivery(r DeliveryRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Delivery = &r
+	return m.saveLocked()
 }
 
 // SetTranscript records a completed transcription, and saves.

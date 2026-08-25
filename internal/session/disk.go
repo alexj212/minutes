@@ -98,3 +98,37 @@ func Live(root string) ([]Status, error) {
 	}
 	return out, nil
 }
+
+// DirSize is how much a recording occupies.
+//
+// Walked rather than tracked in the manifest: the manifest records the size of
+// each segment, but a recording directory also holds the transcript, the log
+// and whatever a later phase leaves there, and the number people want is the
+// one that matches `du`.
+func DirSize(dir string) (int64, error) {
+	var total int64
+	err := filepath.Walk(dir, func(_ string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total, err
+}
+
+// HumanBytes renders a size the way a person reads one.
+func HumanBytes(n int64) string {
+	const unit = 1000
+	if n < unit {
+		return fmt.Sprintf("%dB", n)
+	}
+	div, exp := int64(unit), 0
+	for v := n / unit; v >= unit; v /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "kMGT"[exp])
+}
