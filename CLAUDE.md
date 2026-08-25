@@ -159,11 +159,18 @@ until something plays.
 
 ### Speaker attribution is free, but only with headphones
 
-The microphone track is you and the system track is everyone else — unless the
-meeting is playing through speakers, in which case the microphone hears the far
-end too and the same sentence arrives attributed to both people. Echoes are
-detected and removed from the microphone track, and the count is reported. Prefer
-headphones.
+The microphone track is you and the system track is everyone else. **Verified on
+real audio**: a recording with ten seconds of a live voice on the microphone
+while the system track held digital silence attributed every line correctly, with
+timing right to the second.
+
+The qualifier is speakers. With the meeting playing out loud the microphone hears
+the far end too, and the same sentence arrives attributed to both people. Echoes
+are detected and removed from the microphone track, and the count is reported —
+but a *short* fragment can evade the text comparison and be misattributed to you,
+which is this design's worst failure in miniature. See `docs/gaps.md`.
+
+Prefer headphones. With them the problem does not exist.
 
 ### A capture that dies is not a capture that ended
 

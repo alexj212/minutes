@@ -85,6 +85,35 @@ that is three things to remember and two to forget.
 **Fix:** `minutes stop --then transcribe,deliver --to <project>`, or a
 `minutes wrap` that does all three.
 
+### Short bleed fragments evade suppression and are misattributed to you
+
+Found by the recording that finally proved attribution. The last line of it was:
+
+```
+[00:00:26] Others: The open question is whether we keep the old end
+[00:00:28] You:    all
+```
+
+`all` is the tail of *"...the old endpoint alive"* arriving at the microphone
+through the air. It should have been suppressed as an echo and was not, because
+the system track's own transcription was cut at *"the old end"* — so the word
+never appears in the line it is an echo of, and word containment scored zero.
+
+The result is one of the failures this design most wants to avoid, in miniature:
+**somebody else's word attributed to you**, with nothing about it looking wrong.
+
+It is not obvious how to fix without breaking something else. Dropping every
+short microphone line that overlaps system audio would catch it, and would also
+delete genuine interjections — the "yes", "agreed", "no, Thursday" that carry
+real meaning in a meeting. That trades a rare misattribution for a routine
+omission, and it is not clearly the better trade.
+
+Better signals exist and are not yet used: bleed arrives at the microphone
+quieter than direct speech, and it always coincides with audio on the system
+track, which the recorder can measure rather than infer from text.
+
+**Headphones remove the problem entirely.** They remain the right answer.
+
 ### Thresholds are fixed, and two of them can drop real speech
 
 - **Silence floor, −60 dBFS.** Segments quieter than this are never transcribed.
@@ -122,26 +151,34 @@ These are known scope, not oversights.
 
 ---
 
+## 3b. Since proven
+
+**Microphone-side attribution, with a live human voice.** Verified on a
+27-second recording containing ten seconds of a real person speaking into the
+microphone while the system track held exact digital silence, followed by a
+synthetic voice on the system track. Every line landed on the right side:
+
+```
+[00:00:03] Others: Please talk now, until I speak again.
+[00:00:07] You:   The rain in Spain falls mainly on the plane...
+[00:00:17] Others: Right, let us start the stand-up.
+```
+
+Timing was correct to the second against the measured onset of speech. Three
+microphone echoes of the system track were suppressed, and — as in all four
+recordings checked this way — every suppressed line was a genuine echo. The one
+misattribution it produced is the gap above.
+
+This was the design's headline claim and the last thing about it taken on trust.
+
 ## 4. Claimed but not verified
 
 Listed separately because an unverified claim and a known gap are different
 things, and this project's own rule is to verify against a real device before
 believing a design.
 
-- **Microphone-side attribution, with a live human voice.** Every proof recording
-  so far has had speech only on the system track, across three attempts —
-  including one where a synthetic voice cued the operator out loud and left an
-  eight-second silent window to speak into. **This is the headline claim of the
-  whole design and it is the one thing not proven on real audio.**
-
-  What *is* established: attribution and ordering are covered by unit tests, and
-  in all three recordings the raw untrimmed microphone transcript was checked
-  against what echo suppression removed. Every dropped line was a genuine echo —
-  **zero false positives** — so suppression is not silently eating speech. That
-  is evidence it would not destroy the proof, not evidence the proof passes.
-
-  Closing this needs one thirty-second take with somebody actually speaking, or a
-  real call.
+*Microphone-side attribution was the entry here for three attempts. It is now
+proven — see below — and what it exposed is listed as a gap of its own.*
 - **A long meeting.** The longest run is 32 seconds. Segment rotation, timeline
   drift and manifest growth over 90 minutes are untested. The drift arithmetic
   is sound and the sample counter measured 0.1 ms against wall-clock over 13
@@ -165,8 +202,9 @@ checked before recording.
 
 What is left, in order:
 
-1. **Prove microphone-side attribution on a real recording.** Three attempts have
-   not produced one. It is the design's headline claim and the only thing here
-   that a single thirty-second take would settle.
+1. **Short bleed fragments misattributed to you.** Rare, but it is the design's
+   own worst failure in miniature. Needs a signal other than word overlap —
+   level, or system-track energy — rather than a blunter text rule that would
+   delete real interjections.
 2. **Make an active recording visible outside the terminal that started it.**
 3. **`minutes prune`.** Nothing deletes anything, at 1.33 GB/hour.
