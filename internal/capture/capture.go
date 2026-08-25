@@ -1,10 +1,9 @@
-// Package capture drives the platform capture helper and writes one file per
-// track.
+// Package capture drives the platform capture helper and writes each track to
+// disk as a series of segments, keeping a manifest beside them.
 //
-// This is R1's proof harness rather than the orchestrator: no segments, no
-// manifest, no start/stop lifecycle. It exists to demonstrate that two aligned,
-// non-silent tracks come out of a real machine, which is the only claim R1
-// makes.
+// It does not decide when to record or where the notes go. Both of those are
+// judgment calls, and a session makes them; this only does the part that has to
+// happen on the machine with the audio hardware.
 package capture
 
 import (
@@ -12,83 +11,43 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"math"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"time"
 
 	"github.com/alexj/minutes/internal/frame"
+	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj/minutes/internal/segment"
+	"github.com/alexj/minutes/internal/timeline"
 	"github.com/alexj/minutes/internal/wav"
 )
 
 // Options configures a recording.
 type Options struct {
-	Helper string
-	OutDir string
-	Prefix string
-	// Duration bounds the recording. Zero records until the context is
-	// cancelled.
+	Helper   string
+	Manifest *manifest.Manifest
+	// Duration bounds the recording. Zero records until ctx is cancelled.
 	Duration time.Duration
-	// Log receives progress lines. Recording is a trust matter, so this is
-	// used to make an active recording obvious rather than quiet.
-	Log func(string, ...any)
+	Log      func(string, ...any)
 }
 
-// TrackSummary describes what one track actually captured.
-type TrackSummary struct {
-	Track         frame.Track
-	Path          string
-	Device        string
-	SampleRate    int
-	Channels      int
-	Packets       int
-	Duration      float64
-	PaddedSeconds float64
-	PeakDBFS      float64
-	Discontinuity int
-}
-
-// Silent reports whether the track carries no signal above the floor of a
-// 16-bit file. A track that is silent is the failure this whole design exists
-// to catch, so it is computed and reported rather than left for someone to
-// notice later.
-func (t TrackSummary) Silent() bool { return t.PeakDBFS <= -90 }
-
-// Summary is the outcome of a recording.
-type Summary struct {
-	Tracks []TrackSummary
-	// EpochQPC100ns is the instant both files call sample zero. Their shared
-	// origin is what makes the two transcripts mergeable later.
-	EpochQPC100ns uint64
-}
-
-type trackState struct {
-	info    frame.TrackInfo
-	writer  *wav.Writer
-	packets int
-	peak    int16
-	discont int
-}
-
-// Run records until Duration elapses or ctx is cancelled, and returns what was
-// captured.
-func Run(ctx context.Context, opt Options) (*Summary, error) {
+// Run records until Duration elapses or ctx is cancelled.
+//
+// The manifest is updated as segments open and close, so it describes what is
+// on disk at every moment rather than only at the end.
+func Run(ctx context.Context, opt Options) error {
 	if opt.Log == nil {
 		opt.Log = func(string, ...any) {}
 	}
-	if opt.Prefix == "" {
-		opt.Prefix = "recording"
-	}
-	if err := os.MkdirAll(opt.OutDir, 0o755); err != nil {
-		return nil, err
+	m := opt.Manifest
+	if m == nil {
+		return fmt.Errorf("capture needs a manifest")
 	}
 
 	args := []string{}
 	if opt.Duration > 0 {
 		args = append(args, "--duration-ms", fmt.Sprintf("%d", opt.Duration.Milliseconds()))
 	}
-
 	cmd := exec.Command(opt.Helper, args...)
 
 	// stdin is held open deliberately: closing it is how a Linux parent stops a
@@ -96,20 +55,20 @@ func Run(ctx context.Context, opt Options) (*Summary, error) {
 	// signal that survives the crossing.
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	cmd.Stderr = os.Stderr
 
 	if err := cmd.Start(); err != nil {
-		return nil, fmt.Errorf("starting capture helper: %w", err)
+		return fmt.Errorf("starting capture helper: %w", err)
 	}
 
-	// Cancelling stops the helper by closing its stdin, letting it finish the
-	// packet in hand and emit its END frames rather than dying mid-write.
+	// Cancelling closes the helper's stdin, letting it finish the packet in
+	// hand and emit its END frames rather than dying mid-write.
 	stopped := make(chan struct{})
 	go func() {
 		select {
@@ -119,18 +78,26 @@ func Run(ctx context.Context, opt Options) (*Summary, error) {
 		}
 	}()
 
+	type trackState struct {
+		info   frame.TrackInfo
+		writer *segment.Writer
+		// place is created with the first audio packet, because it needs the
+		// shared epoch and that is not known until one arrives.
+		place *timeline.Track
+	}
 	tracks := map[frame.Track]*trackState{}
 	var epoch uint64
 	var epochSet bool
+	var runErr error
 
 	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<20))
-	var readErr error
 
+loop:
 	for {
 		f, err := reader.Next()
 		if err != nil {
 			if err != io.EOF {
-				readErr = err
+				runErr = fmt.Errorf("reading capture stream: %w", err)
 			}
 			break
 		}
@@ -139,60 +106,54 @@ func Run(ctx context.Context, opt Options) (*Summary, error) {
 		case frame.TypeTrackInfo:
 			info, err := frame.ParseTrackInfo(f.Payload)
 			if err != nil {
-				readErr = err
-				break
+				runErr = err
+				break loop
 			}
-			path := filepath.Join(opt.OutDir, fmt.Sprintf("%s-%s.wav", opt.Prefix, f.Track))
-			w, err := wav.NewWriter(path, int(info.SampleRate), int(info.Channels))
+			name := f.Track.String()
+			sw, err := segment.NewWriter(m.Dir(), name,
+				int(info.SampleRate), int(info.Channels), m.SegmentSeconds)
 			if err != nil {
-				readErr = err
-				break
+				runErr = err
+				break loop
 			}
-			tracks[f.Track] = &trackState{info: info, writer: w}
-			opt.Log("track %s: %s, %d Hz, %d ch -> %s",
-				f.Track, info.Device, info.SampleRate, info.Channels, filepath.Base(path))
+			sw.OnSegment = func(seg manifest.Segment) error {
+				return m.PutSegment(name, seg)
+			}
+			if err := m.SetTrack(name, info.Device, int(info.SampleRate), int(info.Channels)); err != nil {
+				runErr = err
+				break loop
+			}
+			tracks[f.Track] = &trackState{info: info, writer: sw}
+			opt.Log("track %s: %s, %d Hz, %d ch", name, info.Device, info.SampleRate, info.Channels)
 
 		case frame.TypeAudio:
 			ts := tracks[f.Track]
 			if ts == nil {
-				// Audio before its TRACK_INFO means the stream is malformed;
-				// guessing a format here would produce a file that plays as
-				// noise, which is worse than stopping.
-				readErr = fmt.Errorf("audio for %s before its track info", f.Track)
-				break
+				// Audio before its TRACK_INFO means the stream is malformed.
+				// Guessing a format here produces a file that plays as noise,
+				// which is worse than stopping.
+				runErr = fmt.Errorf("audio for %s before its track info", f.Track)
+				break loop
 			}
 			if !epochSet {
 				epoch, epochSet = f.QPC100ns, true
+				if err := m.SetEpoch(epoch); err != nil {
+					runErr = err
+					break loop
+				}
 			}
 			samples, err := wav.ToInt16(f.Payload, ts.info.FormatTag, ts.info.BitsPerSample)
 			if err != nil {
-				readErr = err
-				break
+				runErr = err
+				break loop
 			}
-
-			// Where this packet belongs, from the clock both tracks share.
-			var offset uint64
-			if f.QPC100ns > epoch {
-				offset = (f.QPC100ns - epoch) * uint64(ts.info.SampleRate) / 10_000_000
+			if ts.place == nil {
+				ts.place = timeline.NewTrack(uint64(ts.info.SampleRate), epoch)
 			}
-			if err := ts.writer.WriteAt(offset, samples); err != nil {
-				readErr = err
-				break
-			}
-			ts.packets++
-			if f.Flags&frame.FlagDiscontinuity != 0 {
-				ts.discont++
-			}
-			for _, s := range samples {
-				v := s
-				if v == math.MinInt16 {
-					v = math.MaxInt16
-				} else if v < 0 {
-					v = -v
-				}
-				if v > ts.peak {
-					ts.peak = v
-				}
+			offset := ts.place.Place(f.QPC100ns, f.DevicePos)
+			if err := ts.writer.WriteAt(offset, samples, f.Flags); err != nil {
+				runErr = err
+				break loop
 			}
 
 		case frame.TypeLog:
@@ -201,51 +162,32 @@ func Run(ctx context.Context, opt Options) (*Summary, error) {
 		case frame.TypeEnd:
 			opt.Log("track %s ended after %d audio frames", f.Track, f.DevicePos)
 		}
-
-		if readErr != nil {
-			break
-		}
 	}
 
 	close(stopped)
+
+	// Close the segments before reporting anything, so the manifest is final
+	// even on the failure path. A recording that ended badly still has whatever
+	// it captured, and that is the part worth keeping.
+	for id, ts := range tracks {
+		if err := ts.writer.Close(); err != nil && runErr == nil {
+			runErr = err
+		}
+		// A re-anchor means the endpoint's sample counter and the wall clock
+		// disagreed by more than jitter. It is recorded rather than swallowed,
+		// because a later phase merges two transcripts on this timeline.
+		if ts.place != nil && ts.place.Reanchors > 0 {
+			opt.Log("track %s: re-anchored %d time(s) — the device clock and the wall clock disagreed",
+				id, ts.place.Reanchors)
+			if err := m.SetReanchors(id.String(), ts.place.Reanchors); err != nil && runErr == nil {
+				runErr = err
+			}
+		}
+	}
+
 	waitErr := cmd.Wait()
-
-	sum := &Summary{EpochQPC100ns: epoch}
-	for _, id := range []frame.Track{frame.TrackMic, frame.TrackSystem} {
-		ts, ok := tracks[id]
-		if !ok {
-			continue
-		}
-		t := TrackSummary{
-			Track:         id,
-			Path:          ts.writer.Path(),
-			Device:        ts.info.Device,
-			SampleRate:    int(ts.info.SampleRate),
-			Channels:      int(ts.info.Channels),
-			Packets:       ts.packets,
-			Duration:      ts.writer.Duration(),
-			PaddedSeconds: float64(ts.writer.PaddedFrames) / float64(ts.info.SampleRate),
-			Discontinuity: ts.discont,
-			PeakDBFS:      dbfs(ts.peak),
-		}
-		if err := ts.writer.Close(); err != nil {
-			return nil, fmt.Errorf("closing %s: %w", t.Path, err)
-		}
-		sum.Tracks = append(sum.Tracks, t)
+	if runErr == nil && waitErr != nil {
+		runErr = fmt.Errorf("capture helper failed: %w", waitErr)
 	}
-
-	if readErr != nil {
-		return sum, fmt.Errorf("reading capture stream: %w", readErr)
-	}
-	if waitErr != nil {
-		return sum, fmt.Errorf("capture helper failed: %w", waitErr)
-	}
-	return sum, nil
-}
-
-func dbfs(peak int16) float64 {
-	if peak <= 0 {
-		return math.Inf(-1)
-	}
-	return 20 * math.Log10(float64(peak)/32767)
+	return runErr
 }

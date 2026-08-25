@@ -113,8 +113,20 @@ func (w *Writer) writeSamples(samples []int16) error {
 	return nil
 }
 
-// Close patches the RIFF header with the final sizes and closes the file.
-func (w *Writer) Close() error {
+// Sync patches the RIFF header with the sizes written so far.
+//
+// Called periodically while a segment is open, so a recording that is killed
+// mid-segment leaves a file that plays up to the last sync rather than one
+// whose header still claims zero bytes. Without it, "a crash costs one chunk"
+// means losing five minutes; with it, it means losing seconds.
+func (w *Writer) Sync() error {
+	if _, err := w.f.WriteAt(w.header(), 0); err != nil {
+		return err
+	}
+	return w.f.Sync()
+}
+
+func (w *Writer) header() []byte {
 	dataBytes := w.framesWritten * uint64(w.channels) * 2
 	h := make([]byte, headerSize)
 	copy(h[0:], "RIFF")
@@ -129,8 +141,12 @@ func (w *Writer) Close() error {
 	binary.LittleEndian.PutUint16(h[34:], 16)                                // bits
 	copy(h[36:], "data")
 	binary.LittleEndian.PutUint32(h[40:], uint32(dataBytes))
+	return h
+}
 
-	if _, err := w.f.WriteAt(h, 0); err != nil {
+// Close patches the RIFF header with the final sizes and closes the file.
+func (w *Writer) Close() error {
+	if _, err := w.f.WriteAt(w.header(), 0); err != nil {
 		w.f.Close()
 		return err
 	}

@@ -30,7 +30,7 @@ preflight: build helper
 
 # A short proof recording. Both tracks must come out non-silent.
 record: build helper
-	$(BIN) record --duration 15s --out recordings
+	$(BIN) record --duration 15s --segment 5s
 
 clean:
 	rm -f $(BIN) $(HELPER) dist/*.obj

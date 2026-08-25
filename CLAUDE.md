@@ -69,6 +69,20 @@ boundary makes it unrecoverable everywhere downstream, and drift between two
 independently started streams is invisible until you try to align a ninety
 minute transcript.
 
+**Two clocks, and they are good at different things.** `GetBuffer` also reports
+the endpoint's own sample counter, and R2 measured the difference. Wall-clock is
+the only thing the two streams share, so it is what relates one track to the
+other — but it carries about a millisecond of jitter, and placing *every* packet
+by it accumulates that jitter in one direction, because a packet landing behind
+the write head is appended while one landing ahead leaves a gap that is filled.
+Both lengthen the file; neither shortens it. A nominal four-second segment came
+out 176403 frames instead of 176400.
+
+The sample counter has no jitter — it tracked wall-clock to 0.1 ms over 13
+seconds — but counts from whenever its own stream started, so it says nothing
+about the other track. Hence: wall-clock once per track to place its beginning,
+the sample counter for everything after. Carry both in the frame header.
+
 ## Platforms
 
 Verified on the target machines, not assumed:
@@ -87,6 +101,14 @@ through them would work. **Do not.** It reroutes the machine's audio, and its
 failure mode is the bad one: the recording succeeds while the human stops
 hearing the meeting. System-wide WASAPI loopback captures what is playing and
 leaves playback untouched.
+
+**Idle is not the same as silent, and the distinction was measured.** A loopback
+stream delivers no packets at all while the render endpoint is *idle* — before
+any application has opened it. Once one has, silence arrives as real silent
+packets and the stream stays dense: 1278 packets over 13 seconds with no gap,
+across a passage where nothing was playing. So the gap to handle is at the start
+of a recording, not in every quiet moment of a meeting. Both cases still need
+placement by timestamp; only one of them actually occurs.
 
 Accepted cost: loopback captures *everything*, so notification sounds and music
 land on the meeting track. Process-specific loopback
@@ -152,7 +174,11 @@ on someone else's operating system is not.
   loopback, framed timestamped chunks on stdout, driven from Linux over interop.
   Proven on the target machine with two non-silent tracks and a preflight that
   refuses. See `README.md` and `docs/protocol.md`.
-- **R2 — orchestrator:** segments, manifest, `start`/`stop`, storage on disk.
+- **R2 — orchestrator. Done.** Segments on shared-clock boundaries, a sidecar
+  manifest, `start`/`stop`/`status`/`list`, storage on disk. Proven: full
+  segments come out at exactly the nominal frame count on both tracks, the joins
+  are continuous, and a `SIGKILL` mid-segment leaves every completed segment,
+  a valid manifest, and a playable partial.
 - **R3 — transcription**, per track, merged on the shared clock. Pluggable:
   local whisper for anything confidential, a hosted API for speed. The default
   sends meeting audio to a third party, so make that an explicit choice at setup
