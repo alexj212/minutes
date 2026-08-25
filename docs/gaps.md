@@ -183,11 +183,12 @@ proven — see below — and what it exposed is listed as a gap of its own.*
   drift and manifest growth over 90 minutes are untested. The drift arithmetic
   is sound and the sample counter measured 0.1 ms against wall-clock over 13
   seconds, but that is not the same as an hour.
-- **An idle gap mid-recording.** Could not be reproduced on this machine —
-  Windows keeps the render endpoint active well after a stream closes. The
-  timeline has a guard that falls back to wall-clock if the device counter
-  stalls, and the guard is unit-tested, but it has never fired against real
-  hardware.
+- ~~**An idle gap mid-recording.**~~ **Observed in the wild.** A real standup
+  recorded on 2026-08-25 produced 10.7 seconds of gap-fill on the system track
+  and fired the re-anchor guard twice — the render endpoint went idle mid-meeting
+  and the device counter and wall clock diverged past the tolerance. The guard
+  did what it was built for, and the two tracks still finished 14 ms apart over
+  73 seconds. It had never fired against real hardware before this.
 - **Transcription on real meeting audio.** Proven against a synthetic voice with
   known ground truth. Crosstalk, accents, and people talking over each other are
   untested.

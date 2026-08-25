@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/alexj/minutes/internal/frame"
@@ -50,6 +51,19 @@ func Run(ctx context.Context, opt Options) error {
 		args = append(args, "--duration-ms", fmt.Sprintf("%d", opt.Duration.Milliseconds()))
 	}
 	cmd := exec.Command(opt.Helper, args...)
+
+	// Its own process group, so a terminal Ctrl-C does not reach it.
+	//
+	// Ctrl-C signals the whole foreground group, and the helper caught in that
+	// died non-zero — which the orchestrator then reported as a failed
+	// recording, over audio that was captured perfectly well. Stopping is
+	// supposed to happen by closing the helper's stdin, and that is the only
+	// route that lets it finish the packet in hand and emit its END frames.
+	//
+	// Nothing is orphaned by this: if the orchestrator dies without closing
+	// stdin, the pipe closes when its process exits, and the helper sees EOF
+	// and stops anyway.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	// stdin is held open deliberately: closing it is how a Linux parent stops a
 	// Windows child across the interop boundary, with no control channel and no

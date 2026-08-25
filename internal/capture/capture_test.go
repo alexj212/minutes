@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/alexj/minutes/internal/frame"
@@ -186,5 +188,53 @@ func TestAudioBeforeTrackInfoIsRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "before its track info") {
 		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// A terminal Ctrl-C signals the whole foreground process group. The helper must
+// not be in it.
+//
+// This is a regression test for a real one: the helper caught by Ctrl-C died
+// non-zero, and the orchestrator reported "recording failed" over audio it had
+// captured perfectly well. Stopping is supposed to happen by closing the
+// helper's stdin, which is the only route that lets it finish the packet in
+// hand and emit its END frames.
+func TestHelperRunsInItsOwnProcessGroup(t *testing.T) {
+	dir := t.TempDir()
+	data := filepath.Join(dir, "frames.bin")
+
+	var stream []byte
+	stream = append(stream, buildFrame(frame.TypeTrackInfo, frame.TrackMic, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, frame.FormatPCM, 2, "Mic"))...)
+	stream = append(stream, buildFrame(frame.TypeAudio, frame.TrackMic, 0, 0, 0, pcm16(4800))...)
+	if err := os.WriteFile(data, stream, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	pgidFile := filepath.Join(dir, "pgid")
+	script := filepath.Join(dir, "helper")
+	body := fmt.Sprintf("#!/bin/sh\nps -o pgid= -p $$ | tr -d ' ' > %q\ncat %q\n", pgidFile, data)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	m := newManifest(t)
+	if err := Run(context.Background(), Options{Helper: script, Manifest: m}); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := os.ReadFile(pgidFile)
+	if err != nil {
+		t.Fatalf("the helper did not report its process group: %v", err)
+	}
+	helperPGID, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil {
+		t.Fatalf("unreadable process group %q: %v", raw, err)
+	}
+
+	ourPGID := syscall.Getpgrp()
+	if helperPGID == ourPGID {
+		t.Errorf("the helper shares our process group (%d), so a terminal Ctrl-C would "+
+			"kill it mid-write and the recording would be reported as failed", helperPGID)
 	}
 }

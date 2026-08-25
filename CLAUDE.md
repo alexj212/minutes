@@ -172,6 +172,19 @@ which is this design's worst failure in miniature. See `docs/gaps.md`.
 
 Prefer headphones. With them the problem does not exist.
 
+### Stopping is closing stdin, and nothing else may reach the helper
+
+A terminal Ctrl-C signals the whole foreground process group. The helper caught
+in that dies non-zero, and a recording that was captured perfectly well gets
+reported as failed — which happened, on a real standup, the first day this was
+used in anger.
+
+So the helper is started in its own process group. Stopping happens by closing
+its stdin, which is the only route that lets it finish the packet in hand and
+emit its END frames. Nothing is orphaned by this: if the orchestrator dies
+without closing stdin, the pipe closes when its process exits and the helper
+sees EOF anyway.
+
 ### A capture that dies is not a capture that ended
 
 Failing to *open* an endpoint and failing *mid-stream* look identical from
