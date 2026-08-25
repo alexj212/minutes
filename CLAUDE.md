@@ -1,0 +1,164 @@
+---
+description: Use for the meeting recorder — capturing microphone and system audio on a desktop, transcribing it, and delivering notes to the project a meeting was about.
+---
+
+# minutes
+
+Records a meeting from a desktop — **both sides of it** — transcribes it, and
+delivers notes to the project the meeting was actually about.
+
+The name is the deliverable, not the mechanism. A recording nobody reads is
+worth nothing; the point is that a meeting currently produces no durable
+artifact, and afterwards nobody can answer what was decided.
+
+> Rename to `recorder` if that reads better. One directory, one line here.
+
+## What this is not
+
+It is **not a tray application** installed on three operating systems that talks
+to shabadoo. That was the first design and it was wrong.
+
+In shabadoo's model this is a **worker**: a thing that registers a capability
+(`audio.capture`) on the nodes that have it, is driven by that node's core
+session, and delivers through the messaging plane that already exists. See
+`shabadoo/docs/direction.md`, which this project is the worked example in.
+
+The distinction is not pedantry. It decides where the code runs, what it is
+allowed to do, and how it authenticates — all three fall out of being a worker
+rather than an app.
+
+## The shape
+
+```
+core session          "record the standup"
+    ↓
+minutes (worker)      native capture helper per OS → framed PCM on stdout
+    ↓                 two tracks: microphone, system audio
+segments              5-minute chunks, so a crash costs one chunk
+    ↓
+transcribe            each track separately, merged on the shared clock
+    ↓                 your track is you; the other is everyone else
+summarise             decisions, action items, open questions
+    ↓
+deliver               shabadoo's local socket → the right project's inbox
+                                              → a notification
+```
+
+### Two tracks, never one mix
+
+Separate microphone and system tracks make speaker attribution free — your
+track is you, the other track is everyone else — and that is worth more than
+any diarization model. **Mixing is irreversible**, so this is not a
+optimisation to defer; it is a decision that cannot be revisited after the fact.
+
+### Framed, timestamped output — not raw PCM
+
+Both platforms hand back a capture timestamp with every packet:
+`IAudioCaptureClient::GetBuffer` returns a QueryPerformanceCounter position,
+CoreAudio exposes host time. So the two tracks carry stamps from **one clock**
+and alignment is arithmetic rather than cross-correlation.
+
+That is why the helper's stdout carries a small frame header in front of each
+chunk rather than bare samples: throwing the timestamp away at the capture
+boundary makes it unrecoverable everywhere downstream, and drift between two
+independently started streams is invisible until you try to align a ninety
+minute transcript.
+
+## Platforms
+
+Verified on the target machines, not assumed:
+
+| Platform | Microphone | System audio | Notes |
+|---|---|---|---|
+| **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target. MSVC and three Windows SDKs are installed; all carry `audioclientactivationparams.h` |
+| **macOS** | avfoundation | **CoreAudio process taps** | `AudioHardwareTapping.h` + `CATapDescription.h` are in the SDK; Swift 6.3 present |
+| **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
+| **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
+
+### Windows: loopback, not a virtual cable
+
+The machine has VB-Audio Virtual Cable and Voicemeeter installed, and routing
+through them would work. **Do not.** It reroutes the machine's audio, and its
+failure mode is the bad one: the recording succeeds while the human stops
+hearing the meeting. System-wide WASAPI loopback captures what is playing and
+leaves playback untouched.
+
+Accepted cost: loopback captures *everything*, so notification sounds and music
+land on the meeting track. Process-specific loopback
+(`ActivateAudioInterfaceAsync` with `AUDIOCLIENT_ACTIVATION_PARAMS`) records only
+the meeting application and is the obvious refinement — deferred for sequencing,
+not capability. Nothing blocks it; system-wide simply always works and needs no
+process discovery, and mis-targeting a process records silence, which is a
+failure you discover after the meeting.
+
+### The transport is WSL–Windows interop, and it was measured
+
+The shabadoo node runs in WSL and cannot see Windows audio. The two do not share
+a kernel, so a Windows process cannot reach the agent's unix socket.
+
+It does not have to: **a WSL process can exec a Windows binary and read its
+stdout.** All 256 byte values survive that pipe with no CRLF translation —
+tested before the design depended on it.
+
+So there is no TCP listener, no named pipe, no shared filesystem, and **no new
+credential**: the orchestrator stays a Linux process and keeps authenticating to
+the agent socket by file permissions. A Windows-side orchestrator would have
+needed a device token and broken that rule.
+
+`/c/...` and `C:\...` name the same files, and `cl.exe` runs through interop
+(verified: MSVC 19.29). The build stays one command from the Linux side.
+
+### WSL must refuse, not record
+
+`RDPSink.monitor` only carries audio from Linux applications inside WSL. A
+meeting in Teams, Zoom or a browser never touches it, so capturing there yields
+your voice and silence. **Preflight must refuse with an explanation** rather
+than produce a recording that looks successful and contains half a
+conversation — a failure nobody discovers until the meeting is over.
+
+## Delivering the result
+
+Through shabadoo's local socket at `~/.config/shabadoo/agent.sock`, which
+allowlists `/message/send` and `/notify`. The socket is 0600 in the operator's
+own directory, so "can open it" means "is already this user" — **no credential,
+no enrolment**.
+
+Which project the notes belong to is a **judgment call, and a session makes
+it**, not this program. That is the whole reason a worker is driven by a core
+session rather than deciding for itself.
+
+Degrade to writing the file and saying so when the agent is unreachable. A
+recorder that fails because a coordinator blipped would be worse than one that
+never integrated.
+
+## Build order
+
+Each phase is independently useful. **The risk is entirely in the first two** —
+transcription and summarisation are well-trodden; capturing two aligned tracks
+on someone else's operating system is not.
+
+- **R1 — Windows capture, and nothing else.** MSVC, system-wide WASAPI loopback,
+  framed timestamped chunks on stdout, driven from Linux over interop. Prove two
+  non-silent tracks with a working preflight before building anything on top.
+- **R2 — orchestrator:** segments, manifest, `start`/`stop`, storage on disk.
+- **R3 — transcription**, per track, merged on the shared clock. Pluggable:
+  local whisper for anything confidential, a hosted API for speed. The default
+  sends meeting audio to a third party, so make that an explicit choice at setup
+  rather than a silent one.
+- **R4 — summary and delivery** into a project's inbox.
+- **R5 — macOS**, CoreAudio process taps, same framed-stdout shape.
+
+## Conventions
+
+- **Go for the orchestrator**, matching shabadoo. Native only where the platform
+  forces it: the capture helpers, and nothing else.
+- **Store audio on disk, metadata in a manifest.** Never blobs in a database —
+  shabadoo's `hub/release.go` is the pattern, and the reason is that a database
+  gets copied by every backup.
+- **Recording is a trust matter, and in some places a legal one.** Make an active
+  recording obvious rather than quiet, and say in the summary that it was
+  recorded. Cheap now, awkward after the first meeting somebody did not know was
+  being recorded.
+- **Verify against a real device before believing a design.** Everything in the
+  platform table above was checked on the actual machines; the parts that were
+  reasoned about instead were the parts that turned out wrong.
