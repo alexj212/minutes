@@ -3,8 +3,8 @@
 Records a meeting from a desktop — **both sides of it** — so that afterwards
 somebody can answer what was decided.
 
-This is **R1 to R3**: capture, the storage and lifecycle around it, and
-transcription. Summary and delivery are R4 and are deliberately absent. The risk in this project is concentrated here: transcription is
+This is **R1 to R4**: capture, the storage and lifecycle around it,
+transcription, and delivery. macOS is R5 and is absent. The risk in this project is concentrated here: transcription is
 well-trodden, and capturing two aligned tracks on someone else's operating
 system is not.
 
@@ -231,6 +231,47 @@ meeting was on speakers.
 
 Headphones avoid the problem entirely, and are worth preferring.
 
+## Delivery
+
+```
+$ ./dist/minutes deliver --to homelab
+  notes requested from homelab
+```
+
+The transcript goes to a session's inbox through shabadoo's local agent socket,
+along with a brief saying what is wanted: decisions, action items with owners,
+and open questions. The human gets a notification.
+
+**The worker does not summarise, and does not decide where the notes go.** What
+mattered in a meeting and which project it belongs to are both judgments, and a
+session driven by a person is where those are made. `deliver` refuses without a
+`--to` rather than guessing.
+
+> This is a departure from the build order in `CLAUDE.md`, which put
+> `summarise` inside the worker. It was chosen deliberately: the machine has no
+> local model and no API key, and adding either would have meant a multi-gigabyte
+> download or per-meeting cost to do a job the driving session can already do.
+
+### No credential, and nothing to rotate
+
+The socket is `~/.config/shabadoo/agent.sock`, mode 0600 in the operator's own
+directory, so being able to open it means already being this user. This is the
+property that decided the whole architecture: it is why the orchestrator stayed
+a Linux process instead of moving to the Windows side, where it would have
+needed a device token.
+
+### It degrades rather than failing
+
+An unreachable agent is not an error. The brief is written to `delivery.md` in
+the recording directory, and the command says so and exits zero — a recorder
+that lost a meeting because a coordinator blipped would be worse than one that
+never integrated at all.
+
+A refusal is treated differently from an outage, because they mean different
+things: a `429` means the coordinator is throttling the sender, and since notes
+go out once per meeting, reaching that limit means something is sending in a
+loop and says so.
+
 ## What a crash costs
 
 Segments bound it, and the header is patched more often than segments rotate:
@@ -247,4 +288,4 @@ recording with no supervisor alive is reported as `interrupted`, not as
 
 ## Next
 
-**R4** — summary and delivery into a project's inbox.
+**R5** — macOS, CoreAudio process taps, the same framed-stdout shape.

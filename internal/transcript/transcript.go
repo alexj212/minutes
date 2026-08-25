@@ -253,3 +253,16 @@ func clock(seconds float64) string {
 	total := int(seconds)
 	return fmt.Sprintf("%02d:%02d:%02d", total/3600, (total/60)%60, total%60)
 }
+
+// Load reads a transcript previously written into a recording directory.
+func Load(dir string) (*Transcript, error) {
+	body, err := os.ReadFile(filepath.Join(dir, JSONName))
+	if err != nil {
+		return nil, err
+	}
+	var t Transcript
+	if err := json.Unmarshal(body, &t); err != nil {
+		return nil, fmt.Errorf("transcript in %s is unreadable: %w", dir, err)
+	}
+	return &t, nil
+}

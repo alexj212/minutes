@@ -182,7 +182,13 @@ no enrolment**.
 
 Which project the notes belong to is a **judgment call, and a session makes
 it**, not this program. That is the whole reason a worker is driven by a core
-session rather than deciding for itself.
+session rather than deciding for itself. The same applies to what mattered in
+the meeting: `deliver` carries the transcript and the ask, and refuses without a
+named destination rather than guessing one.
+
+Treat a refusal differently from an outage. An unreachable agent costs nothing —
+write the file and say so. A `429` is the coordinator's loop guard, and since
+notes go out once per meeting, hitting it means something is sending in a loop.
 
 Degrade to writing the file and saying so when the agent is unreachable. A
 recorder that fails because a coordinator blipped would be worse than one that
@@ -208,7 +214,16 @@ on someone else's operating system is not.
   has a usable GPU, so the confidential path is also the fast one, and audio
   leaves only when a hosted backend is named in the config. Which backend ran is
   written into the manifest and the transcript.
-- **R4 — summary and delivery** into a project's inbox.
+- **R4 — delivery. Done.** The transcript goes to a session's inbox through the
+  local agent socket, with a brief asking for decisions, action items and open
+  questions, plus a human notification. Degrades to writing `delivery.md` when
+  the agent is unreachable.
+
+  **Summarising moved out of the worker.** The build order put it here, but the
+  machine has no local model and no API key, and the session driving the worker
+  can already do the job — so the worker assembles the material and states the
+  ask, and the session writes the notes. This is the same argument that already
+  applied to choosing the project: it is a judgment, and a session makes it.
 - **R5 — macOS**, CoreAudio process taps, same framed-stdout shape.
 
 ## Conventions

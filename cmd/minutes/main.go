@@ -15,8 +15,11 @@ import (
 	"syscall"
 	"time"
 
+	"errors"
+
 	"github.com/alexj/minutes/internal/capture"
 	"github.com/alexj/minutes/internal/config"
+	"github.com/alexj/minutes/internal/deliver"
 	"github.com/alexj/minutes/internal/manifest"
 	"github.com/alexj/minutes/internal/preflight"
 	"github.com/alexj/minutes/internal/session"
@@ -54,6 +57,11 @@ func usage() {
         Runs locally by default; audio leaves this machine only if a hosted
         backend is named.
 
+  minutes deliver [ID] --to PROJECT [--root DIR] [--no-notify]
+        Hand the transcript to a session so it can write and file the notes,
+        and tell the human. Falls back to writing the brief to disk when the
+        agent is unreachable.
+
 Environment:
   MINUTES_HELPER   path to the capture helper (default: ./dist/minutes-capture.exe)
 `)
@@ -80,6 +88,8 @@ func main() {
 		os.Exit(cmdRecord(args))
 	case "transcribe":
 		os.Exit(cmdTranscribe(args))
+	case "deliver":
+		os.Exit(cmdDeliver(args))
 	case "supervise":
 		os.Exit(cmdSupervise(args))
 	case "-h", "--help", "help":
@@ -377,6 +387,81 @@ func cmdTranscribe(args []string) int {
 	fmt.Printf("\n  %d lines in %s — %d you, %d everyone else\n",
 		len(t.Lines), time.Since(started).Round(time.Second), you, others)
 	fmt.Printf("  %s\n", filepath.Join(dir, transcript.TextName))
+	return 0
+}
+
+func cmdDeliver(args []string) int {
+	fs := flag.NewFlagSet("deliver", flag.ExitOnError)
+	root := fs.String("root", defaultRoot, "where recordings are kept")
+	to := fs.String("to", "", "the project whose session should write the notes")
+	from := fs.String("from", "minutes", "who the message is from")
+	noNotify := fs.Bool("no-notify", false, "do not send a human notification")
+	fs.Parse(args)
+
+	if *to == "" {
+		fmt.Fprintln(os.Stderr, "deliver needs --to: which project the notes belong to is a judgment call,")
+		fmt.Fprintln(os.Stderr, "and this program deliberately does not make it. Name the project.")
+		return 2
+	}
+
+	dir, err := session.Resolve(*root, fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	m, err := manifest.Load(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	t, err := transcript.Load(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "no transcript in %s: run `minutes transcribe` first (%v)\n", dir, err)
+		return 1
+	}
+
+	brief := deliver.Brief{Recording: m, Transcript: t}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	client := deliver.New()
+	err = client.Send(ctx, deliver.Message{
+		To: *to, From: *from, Tag: "minutes",
+		Title: brief.Title(), Body: brief.Body(),
+	})
+
+	if errors.Is(err, deliver.ErrUnreachable) {
+		// Degrade rather than fail. A recorder that loses a meeting because a
+		// coordinator blipped would be worse than one that never integrated at
+		// all; the notes are on disk either way.
+		path := filepath.Join(dir, "delivery.md")
+		body := "# " + brief.Title() + "\n\n" + brief.Body()
+		if werr := os.WriteFile(path, []byte(body), 0o644); werr != nil {
+			fmt.Fprintf(os.Stderr, "agent unreachable, and writing the brief failed too: %v\n", werr)
+			return 1
+		}
+		fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
+		fmt.Printf("  the brief is on disk and nothing was lost:\n    %s\n", path)
+		return 0
+	}
+	if errors.Is(err, deliver.ErrThrottled) {
+		fmt.Fprintf(os.Stderr, "the coordinator is throttling this sender: %v\n", err)
+		fmt.Fprintln(os.Stderr, "that is the loop guard, and a recorder should never reach it — "+
+			"notes go out once per meeting. Something is sending in a loop.")
+		return 1
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "delivery failed: %v\n", err)
+		return 1
+	}
+	fmt.Printf("  notes requested from %s\n", *to)
+
+	if !*noNotify {
+		if err := client.Notify(ctx, "Meeting recorded", brief.NotifyBody(), "minutes"); err != nil {
+			// The message is what matters; the notification is a courtesy.
+			fmt.Printf("  (the human notification did not go out: %v)\n", err)
+		}
+	}
 	return 0
 }
 
