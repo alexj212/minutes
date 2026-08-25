@@ -115,10 +115,10 @@ soon as the audio is safe on disk — measured at about a tenth of a second — 
 the supervisor carries on transcribing. `minutes list` shows the recording as
 `transcribing` until it is done.
 
-It runs in the background rather than in `stop` because whisper on this machine
-manages roughly **real time**, and both tracks are transcribed: a 30-minute
-meeting is an hour of audio and takes about that long. Blocking `stop` on it
-would hang the terminal for the length of the meeting.
+It runs in the background rather than in `stop` because it takes a while.
+Measured on a real two-hour call: **30 minutes** to transcribe both tracks, or
+about 7.4x real time. Blocking `stop` on that would hold the terminal open long
+after the meeting ended.
 
 Turn it off with `"afterStop": false` under `transcription` in the config, and
 run `minutes transcribe` by hand instead.
@@ -361,6 +361,13 @@ missing, and `minutes transcribe` will produce it.
 Every completed segment is intact, the manifest is valid, and the in-progress
 segment is playable up to the last sync — at most five seconds, or a quarter of
 a segment when segments are shorter.
+
+**A stretch is marked "the other side was silent".** The far end said nothing
+for over two minutes, so the call may have dropped or the other party stepped
+away. **What the microphone picked up there may be the room, not the meeting** —
+on a real call this caught thirteen minutes of private household conversation
+sitting in the middle of a work transcript. Read those stretches before sending
+a transcript anywhere.
 
 **"dropped N microphone line(s) that were echoes"** — the meeting was on speakers,
 so the microphone also heard the far end and the same words were transcribed on

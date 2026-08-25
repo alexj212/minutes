@@ -52,6 +52,10 @@ type Line struct {
 	Track   string  `json:"track"`
 	Speaker string  `json:"speaker"`
 	Text    string  `json:"text"`
+	// FarEndSilent marks a line spoken while the other side had been silent
+	// long enough that the call may not have been running. What the microphone
+	// picked up then may be the room rather than the meeting.
+	FarEndSilent bool `json:"farEndSilent,omitempty"`
 }
 
 // Transcript is the merged conversation.
@@ -69,8 +73,10 @@ type Transcript struct {
 	Recorded bool `json:"recorded"`
 	// BleedSuppressed counts microphone lines dropped as echoes of the system
 	// track. A large number means the meeting was played through speakers.
-	BleedSuppressed int    `json:"bleedSuppressed,omitempty"`
-	Lines           []Line `json:"lines"`
+	BleedSuppressed int `json:"bleedSuppressed,omitempty"`
+	// FarEndSilent lists stretches where only the microphone carried speech.
+	FarEndSilent []Silence `json:"farEndSilent,omitempty"`
+	Lines        []Line    `json:"lines"`
 }
 
 // speakerFor maps a track name to who is on it.
@@ -191,6 +197,13 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			"this meeting was on speakers rather than headphones, so the microphone "+
 			"also heard the far end", dropped)
 	}
+	out.FarEndSilent = findFarEndSilence(out.Lines)
+	markFarEndSilence(out.Lines, out.FarEndSilent)
+	for _, g := range out.FarEndSilent {
+		log("the other side was silent from %s for %s (%d lines): "+
+			"the call may have dropped, and what the microphone heard then may be the room",
+			clock(g.Start), roughMinutes(g.Duration()), g.Lines)
+	}
 	return out, nil
 }
 
@@ -240,7 +253,26 @@ func (t *Transcript) Text() string {
 	fmt.Fprintf(&b, "# Transcribed by %s; audio %s this machine.\n\n",
 		t.Backend, map[bool]string{true: "was sent off", false: "stayed on"}[t.AudioLeftMachine])
 
-	for _, l := range t.Lines {
+	if len(t.FarEndSilent) > 0 {
+		fmt.Fprintf(&b, "# %d stretch(es) below are marked: the other side was silent, so what\n"+
+			"# the microphone picked up there may be the room rather than the meeting.\n\n", len(t.FarEndSilent))
+	}
+
+	marked := map[int]Silence{}
+	for _, g := range t.FarEndSilent {
+		for i, l := range t.Lines {
+			if l.Start >= g.Start {
+				if _, seen := marked[i]; !seen {
+					marked[i] = g
+				}
+				break
+			}
+		}
+	}
+	for i, l := range t.Lines {
+		if g, ok := marked[i]; ok {
+			fmt.Fprintf(&b, "\n%s\n", describeSilence(g))
+		}
 		fmt.Fprintf(&b, "[%s] %-6s %s\n", clock(l.Start), l.Speaker+":", l.Text)
 	}
 	return b.String()

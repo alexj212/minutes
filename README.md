@@ -58,8 +58,8 @@ $ minutes deliver --to homelab
 `start` returns and the recording continues without it, because a meeting is
 longer than a command. **Transcription then starts by itself** once the audio is
 safe, and runs in the background — `stop` comes back in about a tenth of a
-second, because transcribing a 30-minute meeting takes about 30 minutes and
-blocking on that would hang the terminal for the length of the meeting.
+second. A two-hour meeting took 30 minutes to transcribe, which is still far too
+long to hold a terminal open for.
 
 Delivery stays manual: which project a meeting's notes belong to is a judgment
 call, and this program does not make it.
@@ -328,7 +328,7 @@ target machine, not estimated:
 |---|---|
 | Track alignment | **0.37 ms**, across two streams at different sample rates |
 | Segment boundaries | exact — 176400 frames at 44.1 kHz, 192000 at 48 kHz |
-| Transcription | about **real time** on an RTX 2080 SUPER with whisper `small` |
+| Transcription | **7.4x real time** on an RTX 2080 SUPER with whisper `small` |
 | Disk | **1.33 GB/hour** for both tracks |
 | Crash cost | one sync interval, ≤5 s — verified with `SIGKILL` |
 

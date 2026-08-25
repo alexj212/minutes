@@ -176,6 +176,44 @@ misattribution it produced is the gap above.
 
 This was the design's headline claim and the last thing about it taken on trust.
 
+### The recorder keeps running when the call does not
+
+Marked now, but not solved. When the far end drops — a reboot, a dropped call,
+somebody stepping away — the recorder carries on and everything the microphone
+hears lands in the transcript attributed to you, indistinguishable from
+something you said in the meeting.
+
+On the first real two-hour call this captured **thirteen minutes of private
+household conversation, including a child**, sitting in the middle of a work
+transcript. It was caught only because a human read it before it was sent
+anywhere.
+
+Stretches where the far end has been silent for over two minutes are now flagged
+in the readable transcript and in the JSON. Validated against that recording: the
+two-minute threshold found exactly the two private windows and nothing else
+across 118 minutes.
+
+**Not solved**, because flagging is not preventing:
+
+- Nothing stops the recording when a call drops, and nothing can reliably tell
+  "the call dropped" from "somebody is presenting for ten minutes".
+- Marked stretches are still in the transcript. Deleting them automatically
+  would lose you thinking aloud, which is worth keeping.
+- Background family audio *during* the meeting proper is not caught by this at
+  all — the far end is talking, so nothing is flagged.
+
+The honest position: **read a transcript before sending it anywhere.**
+
+### `deliver` can only send the transcript, not a summary
+
+`minutes deliver` sends the brief with the transcript inlined or its path
+attached. For a meeting containing anything private that is exactly wrong, and
+the only way to hand over notes without the raw material is to write them by
+hand and send them out of band — which is what had to be done for the meeting
+above.
+
+**Fix:** a mode that delivers only a summary, with no transcript and no path.
+
 ### Loopback captures everything, and it lands in the transcript
 
 Not new, but auto-transcription makes it visible on every meeting rather than
@@ -222,9 +260,12 @@ checked before recording.
 
 What is left, in order:
 
-1. **Short bleed fragments misattributed to you.** Rare, but it is the design's
+1. **Deliver a summary without the transcript.** The first real meeting could
+   not be delivered by the tool at all, because everything it sends carries the
+   raw transcript with it.
+2. **Short bleed fragments misattributed to you.** Rare, but it is the design's
    own worst failure in miniature. Needs a signal other than word overlap —
    level, or system-track energy — rather than a blunter text rule that would
    delete real interjections.
-2. **Make an active recording visible outside the terminal that started it.**
-3. **Automatic retention.** `minutes rm --older-than` exists; nothing runs it.
+3. **Make an active recording visible outside the terminal that started it.**
+4. **Automatic retention.** `minutes rm --older-than` exists; nothing runs it.

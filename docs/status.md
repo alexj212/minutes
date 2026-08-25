@@ -75,10 +75,11 @@ Every number here came off the target machine. Nothing is estimated.
 
 ## Still taken on trust
 
-- **A long meeting.** The longest recording is 73 seconds. Segment rotation,
-  timeline drift and manifest growth over 90 minutes are untested. The
-  arithmetic is sound and the clocks were measured, but that is not the same as
-  an hour.
+- ~~**A long meeting.**~~ **Proven.** A real 117-minute call: 23 and 24 segments
+  rotating cleanly, both tracks finishing within 0.4 s of each other, 2.5 GB on
+  disk against a predicted 1.33 GB/hour. Ctrl-C stopped it cleanly. The far end
+  dropped out repeatedly while the other party rebooted, and the timeline placed
+  everything correctly around the gaps.
 - **Transcription on real meeting audio.** Verified against a synthetic voice
   with known ground truth. Crosstalk, accents and people talking over each other
   are untested.
@@ -128,6 +129,26 @@ The rule: **if the test setup could satisfy the assertion on its own, the test
 proves nothing.**
 
 ---
+
+## The first real meeting, and what it cost to learn
+
+A two-hour call on 2026-08-25 was the first use in anger. It found more than
+every deliberate test combined:
+
+- `minutes record` never transcribed anything, because the automatic
+  continuation was only wired into the detached supervisor.
+- A transcription started by hand was invisible to `minutes list`, which
+  reported `stopped` — indistinguishable from never having started.
+- `minutes list` went ragged on a long meeting name.
+- Transcription is **7.4x real time**, not the ~1x measured on short clips where
+  model loading dominated. The documented figure was wrong by a factor of seven.
+- **The recorder captured thirteen minutes of private household conversation**,
+  including a child, while the other party rebooted — sitting in the middle of a
+  work transcript with nothing to distinguish it. It was caught only because a
+  human read the transcript before it was sent anywhere.
+
+The last one is the one that matters, and it is the reason far-end silence is
+now marked in both the readable transcript and the JSON.
 
 ## What is next
 
