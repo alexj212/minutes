@@ -12,6 +12,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"syscall"
 	"time"
 
@@ -358,8 +360,16 @@ func cmdList(args []string) int {
 		return 0
 	}
 
-	fmt.Printf("  %-28s %-12s %8s %8s  %-12s %s\n",
-		"ID", "STATE", "LENGTH", "SIZE", "TRANSCRIPT", "DELIVERED")
+	// Column width from the data. A fixed one looked fine until a meeting was
+	// named after what it was about, and then every row was ragged.
+	idWidth := len("ID")
+	for _, st := range all {
+		if n := len(st.ID); n > idWidth {
+			idWidth = n
+		}
+	}
+	fmt.Printf("  %-*s %-12s %8s %8s  %-12s %s\n",
+		idWidth, "ID", "STATE", "LENGTH", "SIZE", "TRANSCRIPT", "DELIVERED")
 
 	var total int64
 	for _, st := range all {
@@ -386,11 +396,13 @@ func cmdList(args []string) int {
 			}
 		}
 
-		fmt.Printf("%s %-28s %-12s %7.1fs %8s  %-12s %s\n",
-			mark, st.ID, st.StateLabel(), st.Duration(),
+		fmt.Printf("%s %-*s %-12s %7.1fs %8s  %-12s %s\n",
+			mark, idWidth, st.ID, st.StateLabel(), st.Duration(),
 			session.HumanBytes(size), transcribed, delivered)
-		if st.Name != "" && st.Name != st.ID {
-			fmt.Printf("  %-28s %s\n", "", st.Name)
+		// The id usually already ends in a slug of the name; repeating it
+		// underneath every row is noise.
+		if st.Name != "" && !strings.HasSuffix(st.ID, slug(st.Name)) {
+			fmt.Printf("  %-*s %s\n", idWidth, "", st.Name)
 		}
 	}
 	fmt.Printf("\n  %d recording(s), %s in %s\n", len(all), session.HumanBytes(total), *root)
@@ -538,7 +550,23 @@ func cmdRecord(args []string) int {
 	}
 	fmt.Println("\n  ○ stopped")
 	fmt.Println()
-	return report(m, true)
+	rc := report(m, true)
+
+	// The same continuation the detached supervisor does. Without this, whether
+	// a meeting gets transcribed depends on which command started it, which is
+	// not a distinction anybody should have to remember at the end of a call.
+	if cfg, err := config.Load(); err != nil {
+		fmt.Fprintf(os.Stderr, "  config unreadable, not transcribing: %v\n", err)
+	} else if cfg.Transcription.AfterStop {
+		fmt.Printf("\n  transcribing — roughly %s. Ctrl-C to leave it for `minutes transcribe` later.\n\n",
+			roughly(m.Duration()*2))
+		if err := transcribeInto(ctx, m, cfg, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }); err != nil {
+			fmt.Fprintf(os.Stderr, "  transcription failed (the recording is intact): %v\n", err)
+		} else if t, lerr := transcript.Load(m.Dir()); lerr == nil {
+			fmt.Printf("\n  %d lines -> %s\n", len(t.Lines), filepath.Join(m.Dir(), transcript.TextName))
+		}
+	}
+	return rc
 }
 
 func cmdTranscribe(args []string) int {
@@ -788,6 +816,14 @@ func transcribeInto(ctx context.Context, m *manifest.Manifest, cfg *config.Confi
 		File:             transcript.JSONName,
 	})
 }
+
+// slug mirrors the id-building in session.NewID, so a listing does not repeat a
+// meeting name underneath an id that already contains it.
+func slug(name string) string {
+	return strings.ToLower(strings.Trim(nonAlnum.ReplaceAllString(name, "-"), "-"))
+}
+
+var nonAlnum = regexp.MustCompile(`[^a-zA-Z0-9]+`)
 
 // first returns the first element, or "" — the commands take an optional id.
 func first(ids []string) string {
