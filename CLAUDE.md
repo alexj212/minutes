@@ -51,6 +51,11 @@ track is you, the other track is everyone else — and that is worth more than
 any diarization model. **Mixing is irreversible**, so this is not a
 optimisation to defer; it is a decision that cannot be revisited after the fact.
 
+Measured on the target machine: the two tracks run at *different* sample rates
+— the microphone at 48000 and the render endpoint at 44100 — and still land
+within **0.37 ms** of each other, because they are placed by the shared clock
+rather than by sample count.
+
 ### Framed, timestamped output — not raw PCM
 
 Both platforms hand back a capture timestamp with every packet:
@@ -70,7 +75,7 @@ Verified on the target machines, not assumed:
 
 | Platform | Microphone | System audio | Notes |
 |---|---|---|---|
-| **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target. MSVC and three Windows SDKs are installed; all carry `audioclientactivationparams.h` |
+| **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target, and R1 is built on it. Three Windows SDKs are installed, all carrying `audioclientactivationparams.h`; only the **2019** MSVC install is complete (see below) |
 | **macOS** | avfoundation | **CoreAudio process taps** | `AudioHardwareTapping.h` + `CATapDescription.h` are in the SDK; Swift 6.3 present |
 | **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
 | **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
@@ -108,6 +113,12 @@ needed a device token and broken that rule.
 `/c/...` and `C:\...` name the same files, and `cl.exe` runs through interop
 (verified: MSVC 19.29). The build stays one command from the Linux side.
 
+**Pick the toolchain by completeness, not by version.** The Visual Studio 2022
+and 18 installs on this machine have a `vcvars64.bat` but not the
+`vcvarsall.bat` it calls, so "newest wins" selects an install that cannot
+compile and fails one level down with a message that names the wrong file.
+`native/windows/build.bat` probes for an install that has both.
+
 ### WSL must refuse, not record
 
 `RDPSink.monitor` only carries audio from Linux applications inside WSL. A
@@ -137,9 +148,10 @@ Each phase is independently useful. **The risk is entirely in the first two** �
 transcription and summarisation are well-trodden; capturing two aligned tracks
 on someone else's operating system is not.
 
-- **R1 — Windows capture, and nothing else.** MSVC, system-wide WASAPI loopback,
-  framed timestamped chunks on stdout, driven from Linux over interop. Prove two
-  non-silent tracks with a working preflight before building anything on top.
+- **R1 — Windows capture, and nothing else. Done.** MSVC, system-wide WASAPI
+  loopback, framed timestamped chunks on stdout, driven from Linux over interop.
+  Proven on the target machine with two non-silent tracks and a preflight that
+  refuses. See `README.md` and `docs/protocol.md`.
 - **R2 — orchestrator:** segments, manifest, `start`/`stop`, storage on disk.
 - **R3 — transcription**, per track, merged on the shared clock. Pluggable:
   local whisper for anything confidential, a hosted API for speed. The default
