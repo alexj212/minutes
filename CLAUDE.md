@@ -34,15 +34,23 @@ core session          "record the standup"
     ↓
 minutes (worker)      native capture helper per OS → framed PCM on stdout
     ↓                 two tracks: microphone, system audio
-segments              5-minute chunks, so a crash costs one chunk
-    ↓
+segments              5-minute chunks; the header is synced every few seconds,
+    ↓                 so a crash costs seconds rather than a chunk
 transcribe            each track separately, merged on the shared clock
     ↓                 your track is you; the other is everyone else
-summarise             decisions, action items, open questions
-    ↓
+    ↓                 starts by itself when a recording stops, in the
+    ↓                 background — it runs at about real time
 deliver               shabadoo's local socket → the right project's inbox
                                               → a notification
+    ↓
+core session          writes the notes: decisions, action items, open questions
+                      and files them where they belong
 ```
+
+Summarising sits at the *bottom* of that, not the middle. What mattered in a
+meeting is a judgment, and a session driven by a person is where judgments are
+made — the same reason the worker does not choose which project the notes belong
+to. See `docs/status.md` for what is built and what is still assumed.
 
 ### Two tracks, never one mix
 

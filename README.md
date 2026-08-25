@@ -3,20 +3,23 @@
 Records a meeting from a desktop — **both sides of it** — so that afterwards
 somebody can answer what was decided.
 
-This is **R1 to R4**: capture, the storage and lifecycle around it,
-transcription, and delivery. macOS is R5 and is absent. The risk in this project is concentrated here: transcription is
-well-trodden, and capturing two aligned tracks on someone else's operating
-system is not.
+**R1 to R4 are done and in use on Windows**: capture, storage and lifecycle,
+transcription, and delivery. macOS is R5 and is absent.
 
+- **[docs/status.md](docs/status.md)** — the plan, what is built, and what is proven versus assumed.
 - **[docs/usage.md](docs/usage.md)** — how to use it, command by command.
 - **[docs/gaps.md](docs/gaps.md)** — what it does not do yet, worst first.
 - **[docs/protocol.md](docs/protocol.md)** — the wire format between the helper and the orchestrator.
 - **[CLAUDE.md](CLAUDE.md)** — what this is, and why it is a worker rather than a tray application.
 
-**Before trusting it with a meeting that matters, read
-[gaps.md](docs/gaps.md#1-could-cost-you-a-meeting).** A device that fails
-mid-recording is currently reported as a clean stop, which is precisely the kind
-of quiet failure the rest of this design exists to prevent.
+Two things to know before recording a meeting that matters, both in
+[gaps.md](docs/gaps.md):
+
+- **System-wide loopback captures everything the machine plays**, so a video in
+  another window becomes dialogue in the notes, attributed to a participant.
+  Pause other audio.
+- **Speakers put the far end on your microphone too.** Echoes are removed, but a
+  short fragment can survive and be attributed to you. Headphones avoid it.
 
 ## What works
 
@@ -35,17 +38,35 @@ $ minutes start --name standup
 │  ● RECORDING — microphone and system audio   │
 └──────────────────────────────────────────────┘
   id:       2026-08-25-104604-standup
-  files:    recordings/2026-08-25-104604-standup
+  files:    /home/alexj/minutes/2026-08-25-104604-standup
   segments: 5m0s
 
   stop with:  minutes stop 2026-08-25-104604-standup
 
 $ minutes stop
+  ○ stopped
+  ...
+  transcribing in the background — `minutes list` shows when it is done.
+
+$ minutes list
+  ID                           STATE          LENGTH     SIZE  TRANSCRIPT   DELIVERED
+  2026-08-25-104604-standup    stopped         73.5s   27.1MB  312 lines    —
+
+$ minutes deliver --to homelab
 ```
 
 `start` returns and the recording continues without it, because a meeting is
-longer than a command. `list`, `status` and `stop` read the directory it left
-behind. `record` does the same thing in the foreground.
+longer than a command. **Transcription then starts by itself** once the audio is
+safe, and runs in the background — `stop` comes back in about a tenth of a
+second, because transcribing a 30-minute meeting takes about 30 minutes and
+blocking on that would hang the terminal for the length of the meeting.
+
+Delivery stays manual: which project a meeting's notes belong to is a judgment
+call, and this program does not make it.
+
+`list` shows what you have, with sizes and what has been transcribed and
+delivered. `rm` removes recordings, and refuses to delete one whose notes were
+never delivered.
 
 Each track becomes a series of WAV segments with a `manifest.json` beside them —
 never a mix, and never a blob in a database, because a database gets copied by
@@ -53,10 +74,11 @@ every backup and an hour of stereo audio is hundreds of megabytes to copy
 nightly forever.
 
 ```
-recordings/2026-08-25-104604-standup/
+~/minutes/2026-08-25-104604-standup/
   manifest.json
   mic-000.wav      system-000.wav
   mic-001.wav      system-001.wav
+  transcript.txt   transcript.json
   recorder.log     recorder.pid
 ```
 
@@ -296,6 +318,22 @@ interval.
 `status` reconciles the manifest against reality: a directory that claims to be
 recording with no supervisor alive is reported as `interrupted`, not as
 `recording`.
+
+## Where this stands
+
+Built and used on Windows through WSL. The numbers below were measured on the
+target machine, not estimated:
+
+| | |
+|---|---|
+| Track alignment | **0.37 ms**, across two streams at different sample rates |
+| Segment boundaries | exact — 176400 frames at 44.1 kHz, 192000 at 48 kHz |
+| Transcription | about **real time** on an RTX 2080 SUPER with whisper `small` |
+| Disk | **1.33 GB/hour** for both tracks |
+| Crash cost | one sync interval, ≤5 s — verified with `SIGKILL` |
+
+See [docs/status.md](docs/status.md) for the full picture, including what is
+proven against real hardware and what is still taken on trust.
 
 ## Next
 

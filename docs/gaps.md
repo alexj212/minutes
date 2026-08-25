@@ -4,7 +4,8 @@ Written down because the failures worth fearing here are the quiet ones — a
 recording that looks successful and is not. Anything below that could produce
 one is listed first.
 
-Ordered by what it costs you, not by how hard it is to fix.
+Ordered by what it costs you, not by how hard it is to fix. For what *is* built
+and proven, see [status.md](status.md).
 
 ---
 

@@ -402,4 +402,5 @@ retry; find the loop.
 | `MINUTES_WHISPER` | Path to the whisper binary. |
 | `SHABADOO_SOCKET` | Path to the agent socket. |
 
-See [gaps.md](gaps.md) for what this does not do yet.
+See [gaps.md](gaps.md) for what this does not do yet, and
+[status.md](status.md) for what is built and what is still assumed.
