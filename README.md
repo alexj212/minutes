@@ -8,8 +8,15 @@ transcription, and delivery. macOS is R5 and is absent. The risk in this project
 well-trodden, and capturing two aligned tracks on someone else's operating
 system is not.
 
-For what this is and why it is a worker rather than a tray application, see
-[CLAUDE.md](CLAUDE.md). For the wire format, see [docs/protocol.md](docs/protocol.md).
+- **[docs/usage.md](docs/usage.md)** — how to use it, command by command.
+- **[docs/gaps.md](docs/gaps.md)** — what it does not do yet, worst first.
+- **[docs/protocol.md](docs/protocol.md)** — the wire format between the helper and the orchestrator.
+- **[CLAUDE.md](CLAUDE.md)** — what this is, and why it is a worker rather than a tray application.
+
+**Before trusting it with a meeting that matters, read
+[gaps.md](docs/gaps.md#1-could-cost-you-a-meeting).** A device that fails
+mid-recording is currently reported as a clean stop, which is precisely the kind
+of quiet failure the rest of this design exists to prevent.
 
 ## What works
 

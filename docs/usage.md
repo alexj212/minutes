@@ -1,0 +1,309 @@
+# Using minutes
+
+Records a meeting from this desktop — both sides of it — transcribes it, and
+hands the result to a session that writes the notes.
+
+Command output shown below is real output from the target machine, except where
+a block is marked *illustrative* — those show the shape of a longer meeting than
+anything yet recorded. Measured numbers are called out as measured.
+
+---
+
+## Before anything: ask the machine
+
+```
+$ minutes preflight
+platform: wsl
+helper:   /c/projects/minutes/dist/minutes-capture.exe
+  mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit
+  system  ok   wasapi-loopback  Speakers (Realtek(R) Audio)  44100 Hz, 2 ch, 32-bit
+
+Both tracks can be captured.
+```
+
+Exit code 0 means a recording started now would capture both sides. Non-zero
+means it would not, and the output says why.
+
+**Run this before a meeting you care about**, not after. Preflight opens and
+starts both endpoints rather than just listing them, because a device that
+enumerates and then refuses to start is exactly the failure worth catching
+early. The alternative is a file of the right length, with a waveform in it,
+that plays — and is missing half the conversation.
+
+The two tracks commonly run at *different* sample rates. That is normal and
+handled; they are aligned by timestamp, not by sample count.
+
+---
+
+## Recording
+
+### The usual way: start, and walk away
+
+```
+$ minutes start --name "sprint planning"
+┌──────────────────────────────────────────────┐
+│  ● RECORDING — microphone and system audio   │
+└──────────────────────────────────────────────┘
+  id:       2026-08-25-104604-sprint-planning
+  files:    recordings/2026-08-25-104604-sprint-planning
+  segments: 5m0s
+
+  stop with:  minutes stop 2026-08-25-104604-sprint-planning
+```
+
+`start` returns immediately and the recording continues without it — a meeting
+is longer than a command. It survives the shell closing.
+
+```
+$ minutes stop
+  ○ stopped
+
+  system     11.0s   4 segment(s)  peak -25.5 dBFS  Speakers (Realtek(R) Audio)
+      [00] system-000.wav      3.0s at    0.0s
+      [01] system-001.wav      3.0s at    3.0s
+      [02] system-002.wav      3.0s at    6.0s
+      [03] system-003.wav      2.0s at    9.0s
+  mic        11.0s   4 segment(s)  peak  -2.6 dBFS  Microphone (2- Insta360 Link)
+```
+
+`stop` with no argument stops the recording that is running. `stop <id>` names
+one explicitly.
+
+Stopping is a request, not a kill: the helper finishes the packet in hand,
+closes its segments and writes the final manifest. That takes a moment and is
+worth it.
+
+### The other way: record in the foreground
+
+```
+$ minutes record --duration 15m --name "standup"
+```
+
+Same pipeline, runs until the duration elapses or Ctrl-C. Useful when you want
+to watch it, and for testing.
+
+### While it runs
+
+```
+$ minutes list
+● 2026-08-25-104604-sprint-planning  recording        2.5s  sprint planning
+  2026-08-25-093012-standup          stopped         11.0s  standup
+```
+
+The `●` marks a recording that is actually running. `status` gives the detail:
+
+```
+$ minutes status
+  id:    2026-08-25-104604-sprint-planning
+  state: recording (supervisor pid 3869780)
+  since: 2026-08-25T10:46:04-04:00
+```
+
+`status` reconciles the manifest against reality. A directory that claims to be
+recording with no supervisor alive reports as **interrupted**, not as
+`recording` — trusting the file alone would report a meeting as still being
+captured hours after the thing capturing it went away.
+
+---
+
+## Transcribing
+
+```
+$ minutes transcribe
+  local-whisper:small — audio stays on this machine.
+
+  transcribing 4 file(s) with small on cuda (audio stays on this machine)
+
+  5 lines in 17s — 0 you, 5 everyone else
+  recordings/2026-08-25-123708-two-track-proof/transcript.txt
+```
+
+Both tracks are transcribed separately and merged on the shared clock, so every
+line arrives already attributed. *Illustrative* — a two-sided exchange, which no
+recording here contains yet (see [gaps.md](gaps.md#4-claimed-but-not-verified)):
+
+```
+[00:04:12] You:    I think Friday is more realistic given the migration.
+[00:04:19] Others: That works. Karyn, can you own the notes?
+```
+
+Your track is you; the other track is everyone else. No diarization model is
+involved and there is nothing for one to get wrong.
+
+### Audio does not leave this machine unless you say so
+
+The default backend is local whisper, and there is deliberately **no fallback
+that reaches the network** when it fails — the failure mode of such a fallback
+is that a confidential meeting is uploaded on the day the GPU driver breaks.
+
+Configure at `~/.config/minutes/config.json` (override the path with
+`$MINUTES_CONFIG`):
+
+```json
+{
+  "transcription": {
+    "backend": "local-whisper",
+    "model": "small",
+    "language": "en",
+    "device": "cuda"
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `backend` | `local-whisper` (default) or `openai`. Naming a hosted backend is the act that lets audio leave. |
+| `model` | Whisper size locally (`tiny`…`large-v3`), or an API model name. |
+| `language` | Skips language detection. Leave empty to detect. |
+| `device` | `cuda` or `cpu`, local only. |
+| `baseUrl` | Points a hosted backend at anything OpenAI-compatible. |
+| `apiKeyEnv` | *Name of* the environment variable holding the key — never the key itself, because a config file gets copied, committed and pasted into bug reports. |
+
+Override per run with `--backend` and `--model`. An unknown backend name is an
+error, not a quiet substitution to something that works.
+
+Which backend ran, and whether the audio left, is printed before the run and
+written into both the manifest and the transcript. It is a question somebody may
+have to answer later, possibly to somebody else.
+
+### Choosing a model
+
+On this machine (RTX 2080 SUPER, 8.6 GB), `tiny` and `small` were compared on
+the same 16-second clip with known ground truth:
+
+| Model | Download | Result |
+|---|---|---|
+| `tiny` | 39 MB | Words mostly right, and it hallucinated a sentence nobody said |
+| `small` | 244 MB | Essentially verbatim — one name misspelled. **The default** |
+| `medium` / `large-v3` | 769 MB / 1.5 GB | Not tested here. Both fit the available VRAM |
+
+The first run with a given model downloads it, which is slow and silent. Pull it
+before a meeting rather than after one.
+
+---
+
+## Delivering
+
+```
+$ minutes deliver --to homelab
+  notes requested from homelab
+```
+
+The transcript goes to that project's session inbox with a brief asking for
+decisions, action items with owners, and open questions. The human gets a
+notification.
+
+**`--to` is required.** Which project a meeting's notes belong to is a judgment
+call, and this program does not make it — nor does it write the notes. It
+assembles the material and states the ask; a session driven by a person does the
+rest.
+
+If the agent is unreachable, the brief is written to `delivery.md` in the
+recording directory, the command says so, and it exits zero. A recorder that
+lost a meeting because a coordinator blipped would be worse than one that never
+integrated at all.
+
+No credential is involved anywhere. The socket is
+`~/.config/shabadoo/agent.sock`, mode 0600 in your own directory, so being able
+to open it means already being you.
+
+---
+
+## A whole meeting, start to finish
+
+```
+minutes preflight                        # before it starts
+minutes start --name "vendor call"       # when it starts
+minutes stop                             # when it ends
+minutes transcribe
+minutes deliver --to homelab
+```
+
+---
+
+## What ends up on disk
+
+```
+recordings/2026-08-25-104604-sprint-planning/
+  manifest.json      what everything beside it is
+  mic-000.wav        your track, 5-minute chunks
+  mic-001.wav
+  system-000.wav     everyone else's track
+  system-001.wav
+  transcript.txt     the merged conversation, readable
+  transcript.json    the same, structured, with per-line times and tracks
+  recorder.log       the detached supervisor's output
+  recorder.pid       removed when it stops cleanly
+```
+
+Audio is plain WAV on disk and metadata is in the manifest beside it — never
+blobs in a database, because a database gets copied by every backup.
+
+Useful manifest fields:
+
+| Field | Why you would look at it |
+|---|---|
+| `state` | `recording`, `stopped`, or `failed`. Cross-check with `minutes status`. |
+| `tracks[].segments[].peakDBFS` | How loud each chunk was. `-999` means silent. |
+| `tracks[].segments[].paddedFrames` | Gap-fill — how long nothing was playing. |
+| `tracks[].segments[].complete` | `false` means the recording was interrupted mid-chunk. |
+| `tracks[].reanchors` | Non-zero means the device clock and wall clock disagreed. |
+| `transcript.audioLeftMachine` | Whether this meeting was sent to a third party. |
+| `epochQPC100ns` | The instant both tracks call zero. |
+
+---
+
+## When something is wrong
+
+**"Refusing to record: …"** — preflight found a problem and named it. Nothing was
+recorded, deliberately.
+
+**A track came out SILENT.** `record` and `stop` exit non-zero and say so. For
+the system track it usually means nothing was playing, or the meeting is on an
+output that is not the Windows default endpoint. Check `minutes preflight`
+against the device the meeting is actually on.
+
+**`status` says `interrupted`.** The supervisor died without stopping cleanly.
+Every completed segment is intact, the manifest is valid, and the in-progress
+segment is playable up to the last sync — at most five seconds, or a quarter of
+a segment when segments are shorter.
+
+**"dropped N microphone line(s) that were echoes"** — the meeting was on speakers,
+so the microphone also heard the far end and the same words were transcribed on
+both tracks. The echoes are removed from your track. **Headphones avoid this
+entirely** and are worth preferring: attribution is exact with them.
+
+**"whisper failed on device cuda"** — set `device` to `cpu` in the config, or fix
+the GPU. It will not silently fall back, because a silent fallback to the
+network is how confidential audio gets uploaded.
+
+**"the shabadoo agent is not reachable"** — expected when no agent is running.
+The brief is on disk at `delivery.md`; nothing was lost.
+
+**A `429` on delivery** — the coordinator is throttling. Notes go out once per
+meeting, so reaching that limit means something is sending in a loop. Do not
+retry; find the loop.
+
+---
+
+## Command reference
+
+| Command | What it does |
+|---|---|
+| `minutes preflight` | Report whether both tracks could be captured now. Non-zero if not. |
+| `minutes start [--name N] [--segment 5m] [--root DIR]` | Begin recording and return. |
+| `minutes stop [ID] [--root DIR]` | Stop and report. Defaults to the running one. |
+| `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
+| `minutes list [--root DIR]` | List recordings, newest first. `●` marks a live one. |
+| `minutes record [--duration D] [--name N] [--segment 5m]` | Record in the foreground. |
+| `minutes transcribe [ID] [--backend B] [--model M]` | Transcribe and merge both tracks. |
+| `minutes deliver [ID] --to PROJECT [--no-notify]` | Hand it to a session; tell the human. |
+
+| Environment | Effect |
+|---|---|
+| `MINUTES_HELPER` | Path to the Windows capture helper. |
+| `MINUTES_CONFIG` | Path to the config file. |
+| `MINUTES_WHISPER` | Path to the whisper binary. |
+| `SHABADOO_SOCKET` | Path to the agent socket. |
+
+See [gaps.md](gaps.md) for what this does not do yet.
