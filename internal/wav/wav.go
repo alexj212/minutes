@@ -12,6 +12,7 @@ package wav
 import (
 	"encoding/binary"
 	"fmt"
+	"io"
 	"math"
 	"os"
 )
@@ -196,4 +197,122 @@ func ToInt16(payload []byte, formatTag uint16, bitsPerSample uint16) ([]int16, e
 		return out, nil
 	}
 	return nil, fmt.Errorf("unsupported capture format: tag=%d bits=%d", formatTag, bitsPerSample)
+}
+
+// TrimLeadingSilence copies src to dst without its leading silence, and returns
+// how many seconds it removed.
+//
+// This exists because of how a speech model behaves, not because the silence is
+// unwanted. Given a file that opens with a long silence, whisper anchors its
+// first utterance at zero rather than where the speech actually is — measured,
+// a system track whose audio began 8.25s in had its opening line timestamped
+// 00:00:00. Every later utterance in the same file was correct, so the error is
+// invisible unless you check, and it lands on the first thing anybody said.
+//
+// The system track opens this way in every recording, because the render
+// endpoint is idle until something plays.
+//
+// Only exact digital silence is trimmed. That is what gap-fill is made of, so
+// this cannot remove quiet speech or room tone — only samples this program
+// wrote itself, or ones the endpoint declared silent.
+func TrimLeadingSilence(src, dst string) (float64, error) {
+	in, err := os.Open(src)
+	if err != nil {
+		return 0, err
+	}
+	defer in.Close()
+
+	var h [headerSize]byte
+	if _, err := io.ReadFull(in, h[:]); err != nil {
+		return 0, fmt.Errorf("%s is too short to be a WAV: %w", src, err)
+	}
+	if string(h[0:4]) != "RIFF" || string(h[8:12]) != "WAVE" {
+		return 0, fmt.Errorf("%s is not a RIFF/WAVE file", src)
+	}
+	channels := int(binary.LittleEndian.Uint16(h[22:]))
+	rate := int(binary.LittleEndian.Uint32(h[24:]))
+	bits := int(binary.LittleEndian.Uint16(h[34:]))
+	if bits != 16 || channels <= 0 || rate <= 0 {
+		return 0, fmt.Errorf("%s is %d-bit %d-channel at %d Hz; only 16-bit PCM is handled", src, bits, channels, rate)
+	}
+	blockAlign := channels * 2
+
+	// Scan for the first frame that is not all zero.
+	buf := make([]byte, 1<<16)
+	var silentBytes int64
+	found := false
+	for !found {
+		n, err := io.ReadFull(in, buf)
+		if n == 0 {
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
+				break
+			}
+			return 0, err
+		}
+		chunk := buf[:n-n%blockAlign]
+		for i := 0; i < len(chunk); i += blockAlign {
+			allZero := true
+			for j := 0; j < blockAlign; j++ {
+				if chunk[i+j] != 0 {
+					allZero = false
+					break
+				}
+			}
+			if !allZero {
+				silentBytes += int64(i)
+				found = true
+				break
+			}
+		}
+		if !found {
+			silentBytes += int64(len(chunk))
+		}
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			break
+		}
+	}
+
+	skipped := float64(silentBytes) / float64(blockAlign) / float64(rate)
+
+	// Nothing to gain, and re-writing the file would only be a chance to get it
+	// wrong.
+	if !found || silentBytes == 0 {
+		return 0, copyFile(src, dst)
+	}
+
+	out, err := NewWriter(dst, rate, channels)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := in.Seek(int64(headerSize)+silentBytes, io.SeekStart); err != nil {
+		out.Close()
+		return 0, err
+	}
+	copied, err := io.Copy(out.f, in)
+	if err != nil {
+		out.Close()
+		return 0, err
+	}
+	out.framesWritten = uint64(copied) / uint64(blockAlign)
+	if err := out.Close(); err != nil {
+		return 0, err
+	}
+	return skipped, nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
 }

@@ -16,9 +16,12 @@ import (
 	"time"
 
 	"github.com/alexj/minutes/internal/capture"
+	"github.com/alexj/minutes/internal/config"
 	"github.com/alexj/minutes/internal/manifest"
 	"github.com/alexj/minutes/internal/preflight"
 	"github.com/alexj/minutes/internal/session"
+	"github.com/alexj/minutes/internal/transcribe"
+	"github.com/alexj/minutes/internal/transcript"
 )
 
 const defaultRoot = "recordings"
@@ -46,6 +49,11 @@ func usage() {
   minutes record [--duration D] [--name NAME] [--segment 5m] [--root DIR]
         Record in the foreground until the duration elapses or Ctrl-C.
 
+  minutes transcribe [ID] [--backend B] [--model M] [--root DIR]
+        Transcribe a recording, both tracks, merged on the shared clock.
+        Runs locally by default; audio leaves this machine only if a hosted
+        backend is named.
+
 Environment:
   MINUTES_HELPER   path to the capture helper (default: ./dist/minutes-capture.exe)
 `)
@@ -70,6 +78,8 @@ func main() {
 		os.Exit(cmdList(args))
 	case "record":
 		os.Exit(cmdRecord(args))
+	case "transcribe":
+		os.Exit(cmdTranscribe(args))
 	case "supervise":
 		os.Exit(cmdSupervise(args))
 	case "-h", "--help", "help":
@@ -280,6 +290,94 @@ func cmdRecord(args []string) int {
 	fmt.Println("\n  ○ stopped")
 	fmt.Println()
 	return report(m, true)
+}
+
+func cmdTranscribe(args []string) int {
+	fs := flag.NewFlagSet("transcribe", flag.ExitOnError)
+	root := fs.String("root", defaultRoot, "where recordings are kept")
+	backend := fs.String("backend", "", "override the configured backend")
+	model := fs.String("model", "", "override the configured model")
+	fs.Parse(args)
+
+	dir, err := session.Resolve(*root, fs.Arg(0))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	st, err := session.Open(dir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	if st.Live {
+		fmt.Fprintf(os.Stderr, "%s is still recording. Stop it first.\n", st.ID)
+		return 1
+	}
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	log := func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
+	opt := cfg.TranscribeOptions(log)
+	if *backend != "" {
+		opt.Backend = *backend
+	}
+	if *model != "" {
+		opt.Model = *model
+	}
+
+	tr, err := transcribe.New(opt)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+
+	// Where the audio goes is stated before it goes there, every time.
+	if tr.SendsAudioOffMachine() {
+		fmt.Printf("  ⚠ %s uploads this meeting's audio to a third party.\n", tr.Name())
+		fmt.Printf("    Configured in %s.\n\n", config.Path())
+	} else {
+		fmt.Printf("  %s — audio stays on this machine.\n\n", tr.Name())
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	started := time.Now()
+	t, err := transcript.Build(ctx, st.Manifest, tr, log)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "transcription failed: %v\n", err)
+		return 1
+	}
+	if err := t.Write(dir); err != nil {
+		fmt.Fprintf(os.Stderr, "writing transcript: %v\n", err)
+		return 1
+	}
+	if err := st.Manifest.SetTranscript(manifest.TranscriptRecord{
+		Backend:          t.Backend,
+		AudioLeftMachine: t.AudioLeftMachine,
+		CreatedAt:        t.CreatedAt,
+		Lines:            len(t.Lines),
+		File:             transcript.JSONName,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "recording the transcript in the manifest: %v\n", err)
+		return 1
+	}
+
+	var you, others int
+	for _, l := range t.Lines {
+		if l.Speaker == transcript.SpeakerYou {
+			you++
+		} else {
+			others++
+		}
+	}
+	fmt.Printf("\n  %d lines in %s — %d you, %d everyone else\n",
+		len(t.Lines), time.Since(started).Round(time.Second), you, others)
+	fmt.Printf("  %s\n", filepath.Join(dir, transcript.TextName))
+	return 0
 }
 
 // cmdSupervise is the detached half of `start`. It is not in the usage text

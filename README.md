@@ -3,9 +3,8 @@
 Records a meeting from a desktop — **both sides of it** — so that afterwards
 somebody can answer what was decided.
 
-This is **R1 and R2**: capture, and the storage and lifecycle around it.
-Transcription, summary and delivery are later phases and are deliberately
-absent. The risk in this project is concentrated here: transcription is
+This is **R1 to R3**: capture, the storage and lifecycle around it, and
+transcription. Summary and delivery are R4 and are deliberately absent. The risk in this project is concentrated here: transcription is
 well-trodden, and capturing two aligned tracks on someone else's operating
 system is not.
 
@@ -131,6 +130,9 @@ after the meeting.
 ## Building
 
 Requires WSL with interop enabled, a complete MSVC toolchain, and Go.
+Transcription additionally needs `openai-whisper` on `PATH` (and a working
+`tqdm` — a `tqdm` older than 4.56 cannot import on Python 3.9+, and whisper's
+model download goes through it).
 
 ```
 make all         # Go binary + C++ helper
@@ -161,6 +163,74 @@ An active recording is announced rather than quiet, and a track that came out
 silent is reported rather than left to be discovered later. When this grows a
 summary, the summary should say the meeting was recorded.
 
+## Transcription
+
+```
+$ ./dist/minutes transcribe
+  local-whisper:small — audio stays on this machine.
+
+  transcribing 4 file(s) with small on cuda (audio stays on this machine)
+
+  5 lines in 17s — 0 you, 5 everyone else
+  recordings/2026-08-25-123708-two-track-proof/transcript.txt
+```
+
+Both tracks are transcribed separately and merged on the shared clock, so every
+line arrives already attributed: the microphone track is you, the system track
+is everyone else. No diarization model is involved and there is nothing for one
+to get wrong. That is the return on never mixing the tracks.
+
+### Audio does not leave this machine unless somebody says so
+
+The default backend is local whisper. Getting a recording off this machine takes
+naming a hosted backend in `~/.config/minutes/config.json`:
+
+```json
+{
+  "transcription": {
+    "backend": "local-whisper",
+    "model": "small",
+    "language": "en",
+    "device": "cuda"
+  }
+}
+```
+
+There is no fallback that reaches the network when the local path fails, because
+the failure mode of such a fallback is that a confidential meeting is uploaded
+on the day the GPU driver breaks. An unknown backend name is an error rather
+than a quiet substitution.
+
+Which backend ran, and whether the audio left, is printed before the run and
+written into both the manifest and the transcript — it is a question somebody
+may have to answer later, possibly to somebody else.
+
+### Three things it does that are not obvious
+
+**Silent segments are never sent to the model.** Below −60 dBFS there is nothing
+to transcribe, and a speech model asked to transcribe silence *invents*: whisper
+will confidently return "Thank you." for a minute of nothing, and that lands in
+the notes as something somebody said. The peak is already in the manifest, so
+this costs nothing to check.
+
+**Leading silence is trimmed, and the amount is added back.** Given a file that
+opens with silence, whisper anchors its first utterance at zero rather than
+where the speech is. Measured: a system track whose audio began 8.25s in had its
+opening line timestamped `00:00:00`, while every later line in the same file was
+correct — so the error is invisible unless you check, and it lands on the first
+thing anybody said. The system track opens this way in *every* recording,
+because the render endpoint is idle until something plays.
+
+**Echo of the far end is removed from the microphone track.** With the meeting on
+speakers rather than headphones, the microphone also hears the far end, so the
+same sentence is transcribed on both tracks and arrives attributed to both
+people. A transcript that omits a line is incomplete; one that says you said what
+somebody else said is wrong, and nothing about it looks wrong. The count of
+dropped lines is reported rather than swallowed — a large number means the
+meeting was on speakers.
+
+Headphones avoid the problem entirely, and are worth preferring.
+
 ## What a crash costs
 
 Segments bound it, and the header is patched more often than segments rotate:
@@ -177,4 +247,4 @@ recording with no supervisor alive is reported as `interrupted`, not as
 
 ## Next
 
-**R3** — transcription, per track, merged on the shared clock.
+**R4** — summary and delivery into a project's inbox.

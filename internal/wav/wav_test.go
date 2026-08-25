@@ -188,3 +188,102 @@ func TestToInt16RejectsUnknownFormat(t *testing.T) {
 		t.Error("expected an error for an unsupported format, got nil")
 	}
 }
+
+// Leading silence is trimmed so a speech model does not anchor its first
+// utterance at zero, and the amount removed is reported so it can be added back
+// to every timestamp.
+func TestTrimLeadingSilence(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.wav")
+	w, err := NewWriter(src, 1000, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 2 seconds of silence, then 1 second of tone.
+	tone := make([]int16, 1000*2)
+	for i := range tone {
+		tone[i] = int16(500 + i%100)
+	}
+	if err := w.WriteAt(2000, tone); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "dst.wav")
+	skipped, err := TrimLeadingSilence(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped < 1.99 || skipped > 2.01 {
+		t.Errorf("skipped %v seconds, want 2", skipped)
+	}
+	rate, ch, data := readWAV(t, dst)
+	if rate != 1000 || ch != 2 {
+		t.Errorf("trimmed file is %d Hz %d ch, want 1000 Hz 2 ch", rate, ch)
+	}
+	if got, want := len(data), 1000*2; got != want {
+		t.Fatalf("trimmed file holds %d samples, want %d", got, want)
+	}
+	if data[0] != 500 {
+		t.Errorf("first sample of the trimmed file is %d, want 500 — the trim landed in the wrong place", data[0])
+	}
+}
+
+// A file that does not begin with silence must be passed through unchanged: a
+// rewrite is only a chance to lose something.
+func TestTrimLeavesFileWithoutLeadingSilenceAlone(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.wav")
+	w, err := NewWriter(src, 1000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteAt(0, []int16{7, 8, 9}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "dst.wav")
+	skipped, err := TrimLeadingSilence(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 0 {
+		t.Errorf("skipped %v seconds of a file that opens with audio", skipped)
+	}
+	_, _, data := readWAV(t, dst)
+	if len(data) != 3 || data[0] != 7 {
+		t.Errorf("passthrough changed the data: %v", data)
+	}
+}
+
+// Only exact digital silence is trimmed, so quiet speech and room tone survive.
+// Gap-fill is exact zeros; a microphone's noise floor is not.
+func TestTrimDoesNotRemoveQuietAudio(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "src.wav")
+	w, err := NewWriter(src, 1000, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A very quiet first sample, well below anything audible, but not zero.
+	if err := w.WriteAt(0, []int16{1, 0, 0, 500}); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "dst.wav")
+	skipped, err := TrimLeadingSilence(src, dst)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if skipped != 0 {
+		t.Errorf("trimmed %v seconds starting at a non-zero sample", skipped)
+	}
+}

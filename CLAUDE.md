@@ -141,6 +141,30 @@ and 18 installs on this machine have a `vcvars64.bat` but not the
 compile and fails one level down with a message that names the wrong file.
 `native/windows/build.bat` probes for an install that has both.
 
+### Two things about feeding this to a speech model
+
+Both were found by doing it, not by planning it.
+
+**Never hand it silence.** Whisper does not return nothing for nothing; it
+invents, confidently, and the invention lands in the notes as something somebody
+said. Segments below -60 dBFS are skipped, which the manifest's per-segment peak
+makes free.
+
+**Trim leading silence and add the offset back.** Given a file that opens with
+silence, whisper anchors its first utterance at zero instead of where the speech
+is — measured, a system track whose audio began 8.25s in had its opening line
+stamped 00:00:00 while every later line in the same file was right. The system
+track opens that way in every recording, because the render endpoint is idle
+until something plays.
+
+### Speaker attribution is free, but only with headphones
+
+The microphone track is you and the system track is everyone else — unless the
+meeting is playing through speakers, in which case the microphone hears the far
+end too and the same sentence arrives attributed to both people. Echoes are
+detected and removed from the microphone track, and the count is reported. Prefer
+headphones.
+
 ### WSL must refuse, not record
 
 `RDPSink.monitor` only carries audio from Linux applications inside WSL. A
@@ -179,10 +203,11 @@ on someone else's operating system is not.
   segments come out at exactly the nominal frame count on both tracks, the joins
   are continuous, and a `SIGKILL` mid-segment leaves every completed segment,
   a valid manifest, and a playable partial.
-- **R3 — transcription**, per track, merged on the shared clock. Pluggable:
-  local whisper for anything confidential, a hosted API for speed. The default
-  sends meeting audio to a third party, so make that an explicit choice at setup
-  rather than a silent one.
+- **R3 — transcription. Done.** Per track, merged on the shared clock,
+  pluggable. The default is **local** whisper rather than hosted: this machine
+  has a usable GPU, so the confidential path is also the fast one, and audio
+  leaves only when a hosted backend is named in the config. Which backend ran is
+  written into the manifest and the transcript.
 - **R4 — summary and delivery** into a project's inbox.
 - **R5 — macOS**, CoreAudio process taps, same framed-stdout shape.
 

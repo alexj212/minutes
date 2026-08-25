@@ -149,6 +149,9 @@ type Manifest struct {
 	// recorded without having to infer it.
 	Recorded bool `json:"recorded"`
 
+	// Transcript records that this recording has been transcribed, and how.
+	Transcript *TranscriptRecord `json:"transcript,omitempty"`
+
 	// Error explains a failed state.
 	Error string `json:"error,omitempty"`
 
@@ -251,6 +254,27 @@ func (m *Manifest) PutSegment(track string, seg Segment) error {
 		}
 	}
 	t.Segments = append(t.Segments, seg)
+	return m.saveLocked()
+}
+
+// TranscriptRecord is how a recording's transcript was produced.
+//
+// AudioLeftMachine is the part worth keeping: whether a given meeting was sent
+// to a third party is a question somebody may have to answer later, possibly to
+// somebody else, and memory is not an acceptable source for it.
+type TranscriptRecord struct {
+	Backend          string    `json:"backend"`
+	AudioLeftMachine bool      `json:"audioLeftMachine"`
+	CreatedAt        time.Time `json:"createdAt"`
+	Lines            int       `json:"lines"`
+	File             string    `json:"file"`
+}
+
+// SetTranscript records a completed transcription, and saves.
+func (m *Manifest) SetTranscript(r TranscriptRecord) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Transcript = &r
 	return m.saveLocked()
 }
 
