@@ -122,3 +122,28 @@ func TestRefusesWhenHelperIsMissing(t *testing.T) {
 		t.Fatal("CanRecord is true with no helper")
 	}
 }
+
+// Capture is in the endpoint's mix format but storage is 16-bit PCM, so the
+// disk rate is two bytes per sample per channel whatever the device hands over.
+// Using the capture width would overestimate by double on this machine, where
+// both endpoints report 32-bit float.
+func TestStorageRateUsesStorageWidthNotCaptureWidth(t *testing.T) {
+	r := &Result{
+		Mic:    TrackStatus{OK: true, SampleRate: 48000, Channels: 2, BitsPerSample: 32},
+		System: TrackStatus{OK: true, SampleRate: 44100, Channels: 2, BitsPerSample: 32},
+	}
+	if got, want := r.StorageBytesPerSecond(), 48000*2*2+44100*2*2; got != want {
+		t.Errorf("StorageBytesPerSecond = %d, want %d", got, want)
+	}
+}
+
+// A track that cannot be captured consumes nothing.
+func TestStorageRateIgnoresUnavailableTracks(t *testing.T) {
+	r := &Result{
+		Mic:    TrackStatus{OK: true, SampleRate: 48000, Channels: 2},
+		System: TrackStatus{OK: false, SampleRate: 44100, Channels: 2},
+	}
+	if got, want := r.StorageBytesPerSecond(), 48000*2*2; got != want {
+		t.Errorf("StorageBytesPerSecond = %d, want %d", got, want)
+	}
+}

@@ -54,6 +54,12 @@ $ minutes start --name "sprint planning"
 `start` returns immediately and the recording continues without it — a meeting
 is longer than a command. It survives the shell closing.
 
+It refuses if something is already recording, since that would capture the same
+meeting twice and make a bare `stop` ambiguous — pass `--force` if you really
+want both. It also refuses if the disk holds less than fifteen minutes of
+recording, and warns below two hours. At a measured **1.33 GB/hour** for both
+tracks, a long meeting is not a small file.
+
 ```
 $ minutes stop
   ○ stopped
@@ -255,8 +261,14 @@ Useful manifest fields:
 
 ## When something is wrong
 
-**"Refusing to record: …"** — preflight found a problem and named it. Nothing was
-recorded, deliberately.
+**"Refusing to record: …"** — a pre-start check found a problem and named it:
+an endpoint that will not capture, another recording already running, or not
+enough disk. Nothing was recorded, deliberately.
+
+**A recording came out `failed`.** The device went away mid-meeting — unplugged,
+disabled, or the default endpoint changed. The manifest's `error` says which.
+Everything captured before that point is intact and still listed; the recording
+is simply shorter than the meeting was.
 
 **A track came out SILENT.** `record` and `stop` exit non-zero and say so. For
 the system track it usually means nothing was playing, or the meeting is on an
@@ -291,7 +303,7 @@ retry; find the loop.
 | Command | What it does |
 |---|---|
 | `minutes preflight` | Report whether both tracks could be captured now. Non-zero if not. |
-| `minutes start [--name N] [--segment 5m] [--root DIR]` | Begin recording and return. |
+| `minutes start [--name N] [--segment 5m] [--root DIR] [--force]` | Begin recording and return. Refuses if one is running or the disk is low. |
 | `minutes stop [ID] [--root DIR]` | Stop and report. Defaults to the running one. |
 | `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
 | `minutes list [--root DIR]` | List recordings, newest first. `●` marks a live one. |

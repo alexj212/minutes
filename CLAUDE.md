@@ -165,6 +165,19 @@ end too and the same sentence arrives attributed to both people. Echoes are
 detected and removed from the microphone track, and the count is reported. Prefer
 headphones.
 
+### A capture that dies is not a capture that ended
+
+Failing to *open* an endpoint and failing *mid-stream* look identical from
+outside unless they are separated deliberately. WASAPI returns
+`AUDCLNT_E_DEVICE_INVALIDATED` from `GetBuffer` when the default endpoint
+changes or a device is unplugged — and a helper that logs that and exits zero
+records a meeting cut in half as a meeting that ended there.
+
+So every mid-stream error marks the track failed and exits non-zero, the
+recognisable `HRESULT`s are named rather than printed as eight digits, and the
+orchestrator carries the helper's last message into the manifest. A failed
+recording says what happened to it.
+
 ### WSL must refuse, not record
 
 `RDPSink.monitor` only carries audio from Linux applications inside WSL. A

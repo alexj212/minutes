@@ -36,8 +36,9 @@ func usage() {
         Report whether a recording started now would capture both tracks.
         Exits non-zero if it would not.
 
-  minutes start [--name NAME] [--segment 5m] [--root DIR]
+  minutes start [--name NAME] [--segment 5m] [--root DIR] [--force]
         Begin recording and return. The recording outlives this command.
+        Refuses if something is already recording, or if the disk is too full.
 
   minutes stop [ID] [--root DIR]
         Stop a recording and report what it captured. Defaults to the one
@@ -102,6 +103,58 @@ func main() {
 	}
 }
 
+// readyToRecord runs the checks that must pass before a recording begins, and
+// returns the helper path — or "" if it must not start.
+//
+// Preflight answers "can both sides be captured". These answer the two
+// questions that are just as capable of losing a meeting and are not about
+// audio at all: is something already recording, and is there room to write.
+func readyToRecord(ctx context.Context, root string, force bool) string {
+	helper := checkedHelper(ctx)
+	if helper == "" {
+		return ""
+	}
+
+	// Two supervisors each hold their own microphone and loopback client and
+	// write the same meeting to two directories. It is almost always somebody
+	// forgetting to stop the last one, and it makes a bare `stop` ambiguous.
+	if live, err := session.Live(root); err == nil && len(live) > 0 {
+		fmt.Fprintln(os.Stderr, "Something is already recording:")
+		for _, st := range live {
+			fmt.Fprintf(os.Stderr, "  ● %s (pid %d), started %s\n",
+				st.ID, st.PID, st.StartedAt.Format("15:04:05"))
+		}
+		if !force {
+			fmt.Fprintln(os.Stderr, "\nStarting another would capture the same meeting twice and make")
+			fmt.Fprintln(os.Stderr, "`minutes stop` ambiguous. Stop that one first, or pass --force.")
+			return ""
+		}
+		fmt.Fprintln(os.Stderr, "  --force given; starting anyway.")
+	}
+
+	res, err := preflight.Run(ctx)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "preflight failed: %v\n", err)
+		return ""
+	}
+	head, err := session.EstimateHeadroom(root, res.StorageBytesPerSecond())
+	if err != nil {
+		// Not knowing the free space is not a reason to refuse a meeting.
+		fmt.Fprintf(os.Stderr, "  (could not check free disk: %v)\n", err)
+		return helper
+	}
+	switch {
+	case head.Refuse():
+		fmt.Fprintf(os.Stderr, "Refusing to record: not enough disk.\n  %s\n", head)
+		fmt.Fprintln(os.Stderr, "\nNo real meeting fits in that, so this would fill the disk partway")
+		fmt.Fprintln(os.Stderr, "through — costing the recording and possibly whatever else is running.")
+		return ""
+	case head.Warn():
+		fmt.Printf("  %s\n", head)
+	}
+	return helper
+}
+
 // checkedHelper runs preflight and returns the helper path, or prints the
 // refusal and returns "".
 func checkedHelper(ctx context.Context) string {
@@ -135,9 +188,10 @@ func cmdStart(args []string) int {
 	name := fs.String("name", "", "what the meeting is")
 	root := fs.String("root", defaultRoot, "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
+	force := fs.Bool("force", false, "start even if another recording is running")
 	fs.Parse(args)
 
-	helper := checkedHelper(context.Background())
+	helper := readyToRecord(context.Background(), *root, *force)
 	if helper == "" {
 		return 1
 	}
@@ -255,12 +309,13 @@ func cmdRecord(args []string) int {
 	name := fs.String("name", "", "what the meeting is")
 	root := fs.String("root", defaultRoot, "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
+	force := fs.Bool("force", false, "record even if another recording is running")
 	fs.Parse(args)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	helper := checkedHelper(ctx)
+	helper := readyToRecord(ctx, *root, *force)
 	if helper == "" {
 		return 1
 	}

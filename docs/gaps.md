@@ -10,52 +10,37 @@ Ordered by what it costs you, not by how hard it is to fix.
 
 ## 1. Could cost you a meeting
 
-### A device that fails mid-recording is reported as a clean stop
+### ~~A device that fails mid-recording is reported as a clean stop~~ — fixed
 
-**This is the worst one, and it is the failure this project was built to
-prevent.**
+*Was the worst one here.* A mid-stream `GetBuffer` failure — what an unplugged
+headset or a changed default endpoint produces — used to log and exit zero, so a
+meeting cut in half was recorded as a meeting that ended there.
 
-If the default endpoint changes while recording — headphones unplugged, output
-switched, device removed — WASAPI returns `AUDCLNT_E_DEVICE_INVALIDATED` from
-`GetBuffer`. The helper logs it, stops both tracks, and **exits zero**. The
-manifest records `stopped`, exactly as if somebody had asked it to stop.
+All four mid-stream error paths now mark the track failed, name the `HRESULT`
+where it is recognisable (`AUDCLNT_E_DEVICE_INVALIDATED` and friends), and exit
+non-zero. The orchestrator carries the helper's last message into the manifest,
+so a failed recording says *"the audio device was removed, disabled, or the
+default endpoint changed"* rather than *"exit status 1"*. Audio captured before
+the failure is kept and still listed.
 
-So a meeting that was cut in half at minute six looks, in `minutes list`, like a
-meeting that ended at minute six. The evidence is a line in `recorder.log` that
-nobody reads.
+### ~~Disk is not checked~~ — fixed, but still no retention
 
-Only failures *opening* or *starting* an endpoint currently mark the recording
-failed. Mid-stream failures do not.
+Measured: 1.33 GB/hour total — 0.69 for the microphone at 48 kHz, 0.64 for the
+system track at 44.1 kHz, both stereo 16-bit. A two-hour meeting is 2.7 GB.
 
-**Fix:** set the failure flag on a mid-stream `GetBuffer`/`ReleaseBuffer` error
-so the helper exits non-zero and the manifest records `failed` with the reason.
-Roughly ten lines in `native/windows/capture.cpp` plus a manifest field. This
-should be done before the tool is trusted with a meeting that matters.
+`start` and `record` now estimate headroom from the rates preflight reports,
+refuse below fifteen minutes of room, and warn below two hours.
 
-### Disk is not checked, and it fills at 1.33 GB/hour
+**Still missing:** any retention or prune. Recordings accumulate until somebody
+deletes them, and at 1.33 GB/hour that adds up faster than it looks. A
+`minutes prune` with a keep-N or keep-days policy is the obvious next step.
 
-Measured: 0.69 GB/hour for the microphone at 48 kHz and 0.64 for the system
-track at 44.1 kHz, both stereo 16-bit. A two-hour meeting is 2.7 GB.
+### ~~Two recordings can run at once, silently~~ — fixed
 
-Nothing checks free space before or during a recording, and there is no
-retention or prune. A disk that fills mid-meeting produces write errors whose
-handling has never been exercised.
-
-**Fix:** a preflight free-space check against the expected rate, and a
-`minutes prune` with a keep-N or keep-days policy.
-
-### Two recordings can run at once, silently
-
-`minutes start` twice starts two supervisors, each holding its own microphone
-and loopback client. Both record the same audio to two directories at twice the
-CPU and disk. It is almost always a mistake — somebody forgot to stop the last
-one — and nothing says so.
-
-It also makes a bare `minutes stop` ambiguous: it stops the most recent live
-recording, which may not be the one you meant.
-
-**Fix:** warn (or refuse without `--force`) when starting while another
-recording is live.
+`start` and `record` now refuse when something is already recording, listing what
+it is and its pid, and `--force` overrides. Two supervisors would otherwise
+capture the same meeting twice at twice the CPU and disk, and make a bare
+`minutes stop` ambiguous.
 
 ### An active recording is only obvious where it was started
 
@@ -144,12 +129,19 @@ things, and this project's own rule is to verify against a real device before
 believing a design.
 
 - **Microphone-side attribution, with a live human voice.** Every proof recording
-  so far has had speech only on the system track. Attribution is covered by unit
-  tests, and echo suppression was checked against the raw untrimmed microphone
-  transcript to confirm it removed only genuine echoes — but no recording yet
-  contains a real person speaking on the mic track while somebody else speaks on
-  the system track. **This is the headline claim of the whole design and it is
-  the one thing not proven on real audio.**
+  so far has had speech only on the system track, across three attempts —
+  including one where a synthetic voice cued the operator out loud and left an
+  eight-second silent window to speak into. **This is the headline claim of the
+  whole design and it is the one thing not proven on real audio.**
+
+  What *is* established: attribution and ordering are covered by unit tests, and
+  in all three recordings the raw untrimmed microphone transcript was checked
+  against what echo suppression removed. Every dropped line was a genuine echo —
+  **zero false positives** — so suppression is not silently eating speech. That
+  is evidence it would not destroy the proof, not evidence the proof passes.
+
+  Closing this needs one thirty-second take with somebody actually speaking, or a
+  real call.
 - **A long meeting.** The longest run is 32 seconds. Segment rotation, timeline
   drift and manifest growth over 90 minutes are untested. The drift arithmetic
   is sound and the sample counter measured 0.1 ms against wall-clock over 13
@@ -165,11 +157,16 @@ believing a design.
 
 ---
 
-## What to fix first
+## What to fix next
 
-1. **Mid-stream device failure reported as a clean stop.** It is the only gap
-   here that can lose half a meeting and tell you nothing.
-2. **Prove microphone-side attribution on a real recording.** One thirty-second
-   take with two people, or one person and a real call.
-3. **Warn on concurrent `start`, and check free disk.** Cheap, and both prevent
-   a bad afternoon.
+The three highest-cost items are done: mid-stream device failure is now recorded
+as a failure with its reason, concurrent starts are refused, and the disk is
+checked before recording.
+
+What is left, in order:
+
+1. **Prove microphone-side attribution on a real recording.** Three attempts have
+   not produced one. It is the design's headline claim and the only thing here
+   that a single thirty-second take would settle.
+2. **Make an active recording visible outside the terminal that started it.**
+3. **`minutes prune`.** Nothing deletes anything, at 1.33 GB/hour.

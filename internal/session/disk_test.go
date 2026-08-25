@@ -1,0 +1,116 @@
+package session
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/alexj/minutes/internal/manifest"
+)
+
+// The recording directory is created after the check runs, so a check that
+// failed on a missing directory would never run at all.
+func TestFreeBytesWalksUpToAnExistingAncestor(t *testing.T) {
+	root := t.TempDir()
+	deep := filepath.Join(root, "not", "created", "yet")
+	free, err := FreeBytes(deep)
+	if err != nil {
+		t.Fatalf("checking a directory that does not exist yet failed: %v", err)
+	}
+	if free == 0 {
+		t.Error("reported zero free bytes")
+	}
+}
+
+func TestHeadroomThresholds(t *testing.T) {
+	const rate = 368400 // both tracks, 16-bit stereo at 48k and 44.1k
+
+	cases := []struct {
+		name           string
+		seconds        float64
+		refuse, warn   bool
+	}{
+		{"ten minutes", 600, true, true},
+		{"half an hour", 1800, false, true},
+		{"one hour", 3600, false, true},
+		{"three hours", 3 * 3600, false, false},
+	}
+	for _, c := range cases {
+		h := Headroom{Seconds: c.seconds, BytesPerSecond: rate,
+			FreeBytes: uint64(c.seconds * rate)}
+		if h.Refuse() != c.refuse {
+			t.Errorf("%s: Refuse() = %v, want %v", c.name, h.Refuse(), c.refuse)
+		}
+		if h.Warn() != c.warn {
+			t.Errorf("%s: Warn() = %v, want %v", c.name, h.Warn(), c.warn)
+		}
+	}
+}
+
+// Refusing has to be the strictly stronger condition, or a disk could be too
+// full to start on without ever having been warned about.
+func TestRefuseImpliesWarn(t *testing.T) {
+	for s := 0.0; s < 4*3600; s += 60 {
+		h := Headroom{Seconds: s}
+		if h.Refuse() && !h.Warn() {
+			t.Fatalf("at %.0fs the disk is refused but not warned about", s)
+		}
+	}
+}
+
+func TestEstimateHeadroom(t *testing.T) {
+	dir := t.TempDir()
+	h, err := EstimateHeadroom(dir, 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.BytesPerSecond != 1000 {
+		t.Errorf("BytesPerSecond = %d, want 1000", h.BytesPerSecond)
+	}
+	if want := float64(h.FreeBytes) / 1000; h.Seconds != want {
+		t.Errorf("Seconds = %v, want %v", h.Seconds, want)
+	}
+	if h.String() == "" {
+		t.Error("no description")
+	}
+}
+
+func TestEstimateHeadroomRejectsNonsenseRate(t *testing.T) {
+	if _, err := EstimateHeadroom(t.TempDir(), 0); err == nil {
+		t.Error("accepted a zero capture rate, which would divide by zero")
+	}
+}
+
+// Starting a second recording captures the same meeting twice and makes a bare
+// stop ambiguous, so the live ones have to be findable.
+func TestLiveReturnsOnlyRunningRecordings(t *testing.T) {
+	root := t.TempDir()
+	fixture(t, root, "2026-08-25-100000", manifest.StateStopped, "")
+	fixture(t, root, "2026-08-25-110000", manifest.StateRecording, "4194304") // dead pid
+	running := fixture(t, root, "2026-08-25-120000", manifest.StateRecording, itoa(os.Getpid()))
+
+	live, err := Live(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(live) != 1 {
+		var got []string
+		for _, s := range live {
+			got = append(got, s.ID)
+		}
+		t.Fatalf("Live returned %v, want only the one with a running process", got)
+	}
+	if live[0].Dir() != running {
+		t.Errorf("Live returned %s, want %s", live[0].Dir(), running)
+	}
+}
+
+func TestLiveOfEmptyRootIsEmpty(t *testing.T) {
+	live, err := Live(filepath.Join(t.TempDir(), "nope"))
+	if err != nil {
+		t.Fatalf("listing a missing root errored: %v", err)
+	}
+	if len(live) != 0 {
+		t.Errorf("got %d live recordings from a missing root", len(live))
+	}
+}

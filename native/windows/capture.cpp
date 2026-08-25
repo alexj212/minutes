@@ -193,6 +193,41 @@ struct TrackResult {
     std::string          error;
 };
 
+// describeHR names the failures worth recognising by sight.
+//
+// AUDCLNT_E_DEVICE_INVALIDATED is the one that matters: it is what a default
+// endpoint change, an unplugged headset or a removed device produces. Left
+// unnamed it is an eight-digit number in a log; named, it is the reason the
+// meeting stopped.
+static const char* describeHR(HRESULT hr) {
+    switch (hr) {
+    case AUDCLNT_E_DEVICE_INVALIDATED:
+        return " (the audio device was removed, disabled, or the default endpoint changed)";
+    case AUDCLNT_E_SERVICE_NOT_RUNNING:
+        return " (the Windows audio service stopped)";
+    case AUDCLNT_E_RESOURCES_INVALIDATED:
+        return " (the audio session was taken away)";
+    default:
+        return "";
+    }
+}
+
+// failMidStream records that a running capture died.
+//
+// Distinct from failing to start, and it must be, because the two look
+// identical from outside unless they are separated here: a recording that
+// stopped early because the headphones came out would otherwise be
+// indistinguishable from one somebody chose to stop. That is a meeting cut in
+// half reported as a meeting that ended.
+static void failMidStream(TrackResult* result, uint16_t trackID, const char* what, HRESULT hr) {
+    char msg[512];
+    snprintf(msg, sizeof(msg), "%s failed mid-recording: 0x%08lX%s",
+             what, (unsigned long)hr, describeHR(hr));
+    result->error = msg;
+    result->failed = true;
+    logf(trackID, "%s", msg);
+}
+
 static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
     HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
     bool comInit = SUCCEEDED(hr);
@@ -250,7 +285,7 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
         UINT32 packetFrames = 0;
         hr = ep.capture->GetNextPacketSize(&packetFrames);
         if (FAILED(hr)) {
-            logf(trackID, "GetNextPacketSize failed: 0x%08lX", (unsigned long)hr);
+            failMidStream(result, trackID, "GetNextPacketSize", hr);
             break;
         }
         if (packetFrames == 0) {
@@ -266,7 +301,7 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
             hr = ep.capture->GetBuffer(&data, &numFrames, &wasapiFlags, &devicePos, &qpcPos);
             if (hr == AUDCLNT_S_BUFFER_EMPTY) break;
             if (FAILED(hr)) {
-                logf(trackID, "GetBuffer failed: 0x%08lX", (unsigned long)hr);
+                failMidStream(result, trackID, "GetBuffer", hr);
                 g_stop = true;
                 break;
             }
@@ -291,13 +326,17 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
 
             hr = ep.capture->ReleaseBuffer(numFrames);
             if (FAILED(hr)) {
-                logf(trackID, "ReleaseBuffer failed: 0x%08lX", (unsigned long)hr);
+                failMidStream(result, trackID, "ReleaseBuffer", hr);
                 g_stop = true;
                 break;
             }
 
             hr = ep.capture->GetNextPacketSize(&packetFrames);
-            if (FAILED(hr)) break;
+            if (FAILED(hr)) {
+                failMidStream(result, trackID, "GetNextPacketSize", hr);
+                g_stop = true;
+                break;
+            }
         }
     }
 
@@ -439,9 +478,17 @@ int main(int argc, char** argv) {
     for (auto& t : threads) t.join();
     fflush(stdout);
 
-    // A track that never started is a half-recorded meeting, and that is worth
-    // a non-zero exit rather than a file nobody checks.
-    if ((!systemOnly && micResult.failed.load()) || (!micOnly && sysResult.failed.load()))
+    // A track that never started, or that died while running, is a half-recorded
+    // meeting. Both are worth a non-zero exit rather than a file nobody checks.
+    //
+    // The second case used to exit zero, which meant a meeting cut in half by an
+    // unplugged headset was recorded as a meeting that ended there.
+    if ((!systemOnly && micResult.failed.load()) || (!micOnly && sysResult.failed.load())) {
+        if (!micResult.error.empty())
+            fprintf(stderr, "mic track: %s\n", micResult.error.c_str());
+        if (!sysResult.error.empty())
+            fprintf(stderr, "system track: %s\n", sysResult.error.c_str());
         return 1;
+    }
     return 0;
 }

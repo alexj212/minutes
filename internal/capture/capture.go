@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/alexj/minutes/internal/frame"
@@ -89,6 +90,10 @@ func Run(ctx context.Context, opt Options) error {
 	var epoch uint64
 	var epochSet bool
 	var runErr error
+	// The helper reports why it died in a LOG frame. Keeping the last one per
+	// track means a failed recording's manifest can say "the audio device was
+	// removed" rather than "exit status 1".
+	lastLog := map[frame.Track]string{}
 
 	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<20))
 
@@ -157,6 +162,7 @@ loop:
 			}
 
 		case frame.TypeLog:
+			lastLog[f.Track] = string(f.Payload)
 			opt.Log("helper[%s]: %s", f.Track, string(f.Payload))
 
 		case frame.TypeEnd:
@@ -187,7 +193,25 @@ loop:
 
 	waitErr := cmd.Wait()
 	if runErr == nil && waitErr != nil {
-		runErr = fmt.Errorf("capture helper failed: %w", waitErr)
+		// A non-zero exit means a track never started or died while running.
+		// Either way this recording is half a meeting, and the manifest is about
+		// to record it as failed — so it should carry the reason.
+		if why := reasons(lastLog); why != "" {
+			runErr = fmt.Errorf("capture helper failed: %s", why)
+		} else {
+			runErr = fmt.Errorf("capture helper failed: %w", waitErr)
+		}
 	}
 	return runErr
+}
+
+// reasons renders what each track last reported, in a stable order.
+func reasons(lastLog map[frame.Track]string) string {
+	var parts []string
+	for _, id := range []frame.Track{frame.TrackMic, frame.TrackSystem} {
+		if msg := lastLog[id]; msg != "" {
+			parts = append(parts, fmt.Sprintf("%s track: %s", id, msg))
+		}
+	}
+	return strings.Join(parts, "; ")
 }

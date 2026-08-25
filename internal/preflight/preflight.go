@@ -224,6 +224,21 @@ func Run(ctx context.Context) (*Result, error) {
 	return res, nil
 }
 
+// StorageBytesPerSecond is how fast a recording will consume disk.
+//
+// Capture is in the endpoint's mix format but storage is 16-bit PCM, so the
+// rate on disk is two bytes per sample per channel regardless of what the
+// device hands over.
+func (r *Result) StorageBytesPerSecond() int {
+	total := 0
+	for _, t := range []TrackStatus{r.Mic, r.System} {
+		if t.OK {
+			total += t.SampleRate * t.Channels * 2
+		}
+	}
+	return total
+}
+
 // Describe renders a result for a person.
 func (r *Result) Describe() string {
 	var b strings.Builder
