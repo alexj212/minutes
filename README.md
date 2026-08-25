@@ -21,8 +21,8 @@ of quiet failure the rest of this design exists to prevent.
 ## What works
 
 ```
-$ make all
-$ ./dist/minutes preflight
+$ make install
+$ minutes preflight
 platform: wsl
 helper:   /c/projects/minutes/dist/minutes-capture.exe
   mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit
@@ -30,7 +30,7 @@ helper:   /c/projects/minutes/dist/minutes-capture.exe
 
 Both tracks can be captured.
 
-$ ./dist/minutes start --name standup
+$ minutes start --name standup
 ┌──────────────────────────────────────────────┐
 │  ● RECORDING — microphone and system audio   │
 └──────────────────────────────────────────────┘
@@ -40,7 +40,7 @@ $ ./dist/minutes start --name standup
 
   stop with:  minutes stop 2026-08-25-104604-standup
 
-$ ./dist/minutes stop
+$ minutes stop
 ```
 
 `start` returns and the recording continues without it, because a meeting is
@@ -142,10 +142,14 @@ Transcription additionally needs `openai-whisper` on `PATH` (and a working
 model download goes through it).
 
 ```
-make all         # Go binary + C++ helper
+make all         # Go binary + C++ helper, left in dist/
+make install     # both of them into ~/bin, which is on PATH
 make test        # unit tests
 make preflight   # ask the machine whether it could record right now
 ```
+
+Recordings go to `~/minutes` by default — not a path relative to wherever you
+ran it from. Override with `$MINUTES_ROOT` or `--root`.
 
 A note on the toolchain: `native/windows/build.bat` probes for an install that
 has both `vcvarsall.bat` and `vcvars64.bat`, rather than taking the newest one.
@@ -173,7 +177,7 @@ summary, the summary should say the meeting was recorded.
 ## Transcription
 
 ```
-$ ./dist/minutes transcribe
+$ minutes transcribe
   local-whisper:small — audio stays on this machine.
 
   transcribing 4 file(s) with small on cuda (audio stays on this machine)
@@ -241,7 +245,7 @@ Headphones avoid the problem entirely, and are worth preferring.
 ## Delivery
 
 ```
-$ ./dist/minutes deliver --to homelab
+$ minutes deliver --to homelab
   notes requested from homelab
 ```
 

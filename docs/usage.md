@@ -9,6 +9,37 @@ anything yet recorded. Measured numbers are called out as measured.
 
 ---
 
+## Installing
+
+```
+$ make install          # builds both binaries and puts them in ~/bin
+$ minutes preflight
+```
+
+`make install` places `minutes` and `minutes-capture.exe` together in `~/bin`,
+which is on `PATH`. They must stay together: the orchestrator finds the helper
+by looking beside itself first, so installing one without the other leaves a
+`minutes` that refuses to record and says the helper is missing.
+
+Override the destination with `PREFIX=/somewhere make install`.
+
+The Windows helper runs from the WSL filesystem through interop — verified,
+rather than assumed.
+
+Without installing, both binaries are in `dist/` after `make all` and can be run
+as `./dist/minutes`.
+
+### Where recordings go
+
+`~/minutes` by default, or `$MINUTES_ROOT`, or `--root` per command.
+
+Deliberately not a relative path. Once `minutes` is on `PATH` it gets run from
+wherever you are standing, and a relative default would scatter meetings across
+whichever directories you happened to be in — and then `minutes list` would show
+none of them, because it would be looking beside the current directory too.
+
+**At a measured 1.33 GB/hour, keep an eye on that directory.** Nothing prunes it.
+
 ## Before anything: ask the machine
 
 ```
@@ -313,7 +344,8 @@ retry; find the loop.
 
 | Environment | Effect |
 |---|---|
-| `MINUTES_HELPER` | Path to the Windows capture helper. |
+| `MINUTES_ROOT` | Where recordings are kept. Default `~/minutes`. |
+| `MINUTES_HELPER` | Path to the Windows capture helper. Default: beside the `minutes` binary. |
 | `MINUTES_CONFIG` | Path to the config file. |
 | `MINUTES_WHISPER` | Path to the whisper binary. |
 | `SHABADOO_SOCKET` | Path to the agent socket. |

@@ -27,7 +27,22 @@ import (
 	"github.com/alexj/minutes/internal/transcript"
 )
 
-const defaultRoot = "recordings"
+// defaultRoot is where recordings go when nobody says otherwise.
+//
+// Not a relative path. Once `minutes` is on PATH it is run from wherever you
+// happen to be standing, and a relative default would scatter meetings across
+// whichever directories you were in when they started — then `minutes list`
+// would show none of them, because it looks beside the current directory too.
+func defaultRoot() string {
+	if v := os.Getenv("MINUTES_ROOT"); v != "" {
+		return v
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "recordings"
+	}
+	return filepath.Join(home, "minutes")
+}
 
 func usage() {
 	fmt.Fprint(os.Stderr, `minutes — record both sides of a meeting
@@ -64,7 +79,8 @@ func usage() {
         agent is unreachable.
 
 Environment:
-  MINUTES_HELPER   path to the capture helper (default: ./dist/minutes-capture.exe)
+  MINUTES_ROOT     where recordings are kept (default: ~/minutes)
+  MINUTES_HELPER   path to the capture helper (default: beside this binary)
 `)
 }
 
@@ -186,7 +202,7 @@ func cmdPreflight() int {
 func cmdStart(args []string) int {
 	fs := flag.NewFlagSet("start", flag.ExitOnError)
 	name := fs.String("name", "", "what the meeting is")
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "start even if another recording is running")
 	fs.Parse(args)
@@ -223,7 +239,7 @@ func banner() {
 
 func cmdStop(args []string) int {
 	fs := flag.NewFlagSet("stop", flag.ExitOnError)
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	fs.Parse(args)
 
 	dir, err := session.Resolve(*root, fs.Arg(0))
@@ -243,7 +259,7 @@ func cmdStop(args []string) int {
 
 func cmdStatus(args []string) int {
 	fs := flag.NewFlagSet("status", flag.ExitOnError)
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	fs.Parse(args)
 
 	dir, err := session.Resolve(*root, fs.Arg(0))
@@ -280,7 +296,7 @@ func cmdStatus(args []string) int {
 
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ExitOnError)
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	fs.Parse(args)
 
 	all, err := session.List(*root)
@@ -307,7 +323,7 @@ func cmdRecord(args []string) int {
 	fs := flag.NewFlagSet("record", flag.ExitOnError)
 	dur := fs.Duration("duration", 0, "how long to record; 0 means until Ctrl-C")
 	name := fs.String("name", "", "what the meeting is")
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "record even if another recording is running")
 	fs.Parse(args)
@@ -359,7 +375,7 @@ func cmdRecord(args []string) int {
 
 func cmdTranscribe(args []string) int {
 	fs := flag.NewFlagSet("transcribe", flag.ExitOnError)
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	backend := fs.String("backend", "", "override the configured backend")
 	model := fs.String("model", "", "override the configured model")
 	fs.Parse(args)
@@ -447,7 +463,7 @@ func cmdTranscribe(args []string) int {
 
 func cmdDeliver(args []string) int {
 	fs := flag.NewFlagSet("deliver", flag.ExitOnError)
-	root := fs.String("root", defaultRoot, "where recordings are kept")
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	to := fs.String("to", "", "the project whose session should write the notes")
 	from := fs.String("from", "minutes", "who the message is from")
 	noNotify := fs.Bool("no-notify", false, "do not send a human notification")

@@ -7,7 +7,11 @@ BIN     := dist/minutes
 HELPER  := dist/minutes-capture.exe
 CMDEXE  := /c/Windows/System32/cmd.exe
 
-.PHONY: all build helper test vet clean preflight record
+# Where `make install` puts things. ~/bin is on PATH on both this machine and
+# the Mac, which is why it is the default rather than /usr/local/bin.
+PREFIX ?= $(HOME)/bin
+
+.PHONY: all build helper test vet clean install uninstall preflight record
 
 all: build helper
 
@@ -31,6 +35,23 @@ preflight: build helper
 # A short proof recording. Both tracks must come out non-silent.
 record: build helper
 	$(BIN) record --duration 15s --segment 5s
+
+# Both binaries go together. The orchestrator finds the helper by looking
+# beside itself first, so installing one without the other leaves a `minutes`
+# that refuses to record and says the helper is missing.
+#
+# Windows loads the helper off the WSL filesystem through interop — verified,
+# because it is the kind of thing that is easy to assume and awkward to
+# discover later.
+install: build helper
+	@mkdir -p $(PREFIX)
+	install -m 0755 $(BIN) $(PREFIX)/minutes
+	install -m 0755 $(HELPER) $(PREFIX)/minutes-capture.exe
+	@echo "installed to $(PREFIX)"
+	@command -v minutes >/dev/null 2>&1 || echo "note: $(PREFIX) is not on PATH"
+
+uninstall:
+	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture.exe
 
 clean:
 	rm -f $(BIN) $(HELPER) dist/*.obj
