@@ -286,3 +286,47 @@ func TestLiveTranscribingIsNotInterrupted(t *testing.T) {
 		t.Error("a live transcription was reported interrupted")
 	}
 }
+
+// A transcription started by hand must be visible to everything else, not only
+// to the terminal that started it. An hour-long job that leaves the listing
+// saying "stopped" looks like nothing is happening.
+func TestTranscribingStateIsVisibleInAListing(t *testing.T) {
+	root := t.TempDir()
+	// With a live pid: a transcribing directory whose process is gone is an
+	// *interrupted* transcription, which is a different thing and reads
+	// differently in the listing.
+	dir := fixture(t, root, "2026-08-25-100000", manifest.StateStopped, itoa(os.Getpid()))
+
+	m, err := manifest.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetState(manifest.StateTranscribing); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := List(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("listed %d recordings, want 1", len(all))
+	}
+	if got := all[0].StateLabel(); got != "transcribing" {
+		t.Errorf("listing shows %q while transcribing; the work is invisible", got)
+	}
+}
+
+// And the other way round: transcribing with nothing running is interrupted,
+// so a job that died is not reported as still working.
+func TestTranscribingWithNoProcessReadsAsInterrupted(t *testing.T) {
+	root := t.TempDir()
+	dir := fixture(t, root, "2026-08-25-100000", manifest.StateTranscribing, "4194304")
+	st, err := Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := st.StateLabel(); got != "interrupted" {
+		t.Errorf("StateLabel = %q, want interrupted", got)
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -621,11 +622,38 @@ func cmdTranscribe(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Say so in the manifest for as long as it runs, so `minutes list` shows a
+	// transcription in progress. Without this a job that takes an hour is
+	// invisible to everything except the terminal that started it, and looks
+	// like nothing is happening.
+	wasState := st.State
+	if err := st.Manifest.SetState(manifest.StateTranscribing); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	// A pid file alongside it, because the state alone is not enough: a
+	// "transcribing" directory with no live process is how an *interrupted*
+	// transcription is detected, and without this a perfectly healthy one would
+	// be reported as interrupted the moment anybody looked.
+	pidPath := filepath.Join(dir, session.PIDFile)
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	restore := func() {
+		os.Remove(pidPath)
+		if err := st.Manifest.SetState(wasState); err != nil {
+			fmt.Fprintf(os.Stderr, "restoring state: %v\n", err)
+		}
+	}
+
 	started := time.Now()
 	if err := transcribeInto(ctx, st.Manifest, cfg, log); err != nil {
+		restore()
 		fmt.Fprintf(os.Stderr, "transcription failed: %v\n", err)
 		return 1
 	}
+	restore()
 	t, err := transcript.Load(dir)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)

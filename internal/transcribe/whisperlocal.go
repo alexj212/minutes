@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // BackendLocalWhisper runs OpenAI's whisper locally. Audio never leaves the
@@ -87,6 +88,27 @@ func (w *localWhisper) Transcribe(ctx context.Context, paths []string) ([][]Utte
 
 	w.log("transcribing %d file(s) with %s on %s (audio stays on this machine)",
 		len(paths), w.model, w.device)
+
+	// Whisper says nothing until it is finished, and a long meeting takes a
+	// long time. Counting the transcripts as they land is the only progress
+	// signal available, and an hour of silence is indistinguishable from a hang.
+	stopProgress := make(chan struct{})
+	go func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-stopProgress:
+				return
+			case <-tick.C:
+				done, _ := filepath.Glob(filepath.Join(out, "*.json"))
+				if len(done) > 0 && len(done) < len(paths) {
+					w.log("  %d of %d segments", len(done), len(paths))
+				}
+			}
+		}
+	}()
+	defer close(stopProgress)
 
 	cmd := exec.CommandContext(ctx, w.binary, args...)
 	var stderr strings.Builder
