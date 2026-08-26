@@ -44,6 +44,58 @@ it is and its pid, and `--force` overrides. Two supervisors would otherwise
 capture the same meeting twice at twice the CPU and disk, and make a bare
 `minutes stop` ambiguous.
 
+### The recorder keeps running when the call does not
+
+Marked now, but not solved. When the far end drops — a reboot, a dropped call,
+somebody stepping away — the recorder carries on and everything the microphone
+hears lands in the transcript attributed to you, indistinguishable from
+something you said in the meeting.
+
+On the first real two-hour call this captured **thirteen minutes of private
+household conversation, including a child**, sitting in the middle of a work
+transcript. It was caught only because a human read it before it was sent
+anywhere.
+
+Stretches where the far end has been silent for over two minutes are now flagged
+in the readable transcript and in the JSON. Validated against that recording: the
+two-minute threshold found exactly the two private windows and nothing else
+across 118 minutes.
+
+**Not solved**, because flagging is not preventing:
+
+- Nothing stops the recording when a call drops, and nothing can reliably tell
+  "the call dropped" from "somebody is presenting for ten minutes".
+- Marked stretches are still in the transcript. Deleting them automatically
+  would lose you thinking aloud, which is worth keeping.
+- Background family audio *during* the meeting proper is not caught by this at
+  all — the far end is talking, so nothing is flagged.
+
+The honest position: **read a transcript before sending it anywhere.**
+
+### `deliver` can only send the transcript, not a summary
+
+`minutes deliver` sends the brief with the transcript inlined or its path
+attached. For a meeting containing anything private that is exactly wrong, and
+the only way to hand over notes without the raw material is to write them by
+hand and send them out of band — which is what had to be done for the meeting
+above.
+
+**Fix:** a mode that delivers only a summary, with no transcript and no path.
+
+### Loopback captures everything, and it lands in the transcript
+
+Not new, but auto-transcription makes it visible on every meeting rather than
+only when you ask. System-wide loopback takes whatever the machine is playing,
+so a video in another window becomes dialogue in the notes, attributed to
+`Others` and indistinguishable from a participant.
+
+Observed: a nine-second test recording produced four lines, two of which came
+from unrelated audio playing at the time. There is nothing in the transcript to
+say which is which.
+
+Process-specific loopback (section 3) is the real fix. Until then, the
+transcript of a meeting is the transcript of the machine.
+
 ### An active recording is only obvious where it was started
 
 `start` prints a banner, but then returns. After that, the only way to know this
@@ -156,7 +208,7 @@ These are known scope, not oversights.
 
 ---
 
-## 3b. Since proven
+## 3b. Since proven against real hardware
 
 **Microphone-side attribution, with a live human voice.** Verified on a
 27-second recording containing ten seconds of a real person speaking into the
@@ -175,58 +227,6 @@ recordings checked this way — every suppressed line was a genuine echo. The on
 misattribution it produced is the gap above.
 
 This was the design's headline claim and the last thing about it taken on trust.
-
-### The recorder keeps running when the call does not
-
-Marked now, but not solved. When the far end drops — a reboot, a dropped call,
-somebody stepping away — the recorder carries on and everything the microphone
-hears lands in the transcript attributed to you, indistinguishable from
-something you said in the meeting.
-
-On the first real two-hour call this captured **thirteen minutes of private
-household conversation, including a child**, sitting in the middle of a work
-transcript. It was caught only because a human read it before it was sent
-anywhere.
-
-Stretches where the far end has been silent for over two minutes are now flagged
-in the readable transcript and in the JSON. Validated against that recording: the
-two-minute threshold found exactly the two private windows and nothing else
-across 118 minutes.
-
-**Not solved**, because flagging is not preventing:
-
-- Nothing stops the recording when a call drops, and nothing can reliably tell
-  "the call dropped" from "somebody is presenting for ten minutes".
-- Marked stretches are still in the transcript. Deleting them automatically
-  would lose you thinking aloud, which is worth keeping.
-- Background family audio *during* the meeting proper is not caught by this at
-  all — the far end is talking, so nothing is flagged.
-
-The honest position: **read a transcript before sending it anywhere.**
-
-### `deliver` can only send the transcript, not a summary
-
-`minutes deliver` sends the brief with the transcript inlined or its path
-attached. For a meeting containing anything private that is exactly wrong, and
-the only way to hand over notes without the raw material is to write them by
-hand and send them out of band — which is what had to be done for the meeting
-above.
-
-**Fix:** a mode that delivers only a summary, with no transcript and no path.
-
-### Loopback captures everything, and it lands in the transcript
-
-Not new, but auto-transcription makes it visible on every meeting rather than
-only when you ask. System-wide loopback takes whatever the machine is playing,
-so a video in another window becomes dialogue in the notes, attributed to
-`Others` and indistinguishable from a participant.
-
-Observed: a nine-second test recording produced four lines, two of which came
-from unrelated audio playing at the time. There is nothing in the transcript to
-say which is which.
-
-Process-specific loopback (section 3) is the real fix. Until then, the
-transcript of a meeting is the transcript of the machine.
 
 ## 4. Claimed but not verified
 
