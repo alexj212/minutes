@@ -184,6 +184,16 @@ reported as carrying no speech at all.
 the sharper form of the trust argument this project already makes about
 disclosing that a recording happened.
 
+**Order the tests so the robust one decides.** The model's doubt is a threshold
+on a continuous value, and a threshold decides borderline cases by whichever
+side of the line they fall on. Measured: an echo of the far end was withheld on
+a probability of 0.6001495718955994 against a 0.6 cutoff — a margin of 0.00015,
+four hundredths of a percent of the way from the threshold to certainty. The
+outcome was right and it was right by luck. So echo detection, which compares
+two recordings of the same room, decides first; the model's doubt catches what
+is left, chiefly invention over silence where there is no far end to compare
+against and nothing else can catch it.
+
 **Trim leading silence and add the offset back.** Given a file that opens with
 silence, whisper anchors its first utterance at zero instead of where the speech
 is — measured, a system track whose audio began 8.25s in had its opening line

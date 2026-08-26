@@ -70,8 +70,7 @@ type Line struct {
 	// Suppressed names why a line was withheld from the readable transcript.
 	// Empty on everything that survived.
 	Suppressed string `json:"suppressed,omitempty"`
-	// NoSpeechProb is the model's raw judgement, at full precision, on a line
-	// withheld for that reason.
+	// NoSpeechProb is the model's raw judgement on this span, at full precision.
 	//
 	// Recorded as a number rather than only formatted into the sentence above.
 	// A reviewer found a withheld block reporting exactly "0.600" — the
@@ -235,7 +234,6 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 		trackEnd[track.Name] = track.Duration()
 	}
 
-	var doubted int
 	for i, j := range jobs {
 		for _, u := range results[i] {
 			start := j.start + u.Start
@@ -258,29 +256,11 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 				Speaker: speakerFor(j.track),
 				Text:    u.Text,
 			}
-			// The model said it was probably not listening to speech. Believe
-			// it, rather than publishing what it invented anyway — but write
-			// down what it said and why it went.
-			if u.NoSpeechProb >= noSpeechThreshold {
-				doubted++
-				line.NoSpeechProb = u.NoSpeechProb
-				line.Suppressed = fmt.Sprintf("the model put %.3f probability on this span containing no speech", u.NoSpeechProb)
-				out.Withheld = append(out.Withheld, line)
-				continue
-			}
+			line.NoSpeechProb = u.NoSpeechProb
 			out.Lines = append(out.Lines, line)
 		}
 	}
-	if doubted > 0 {
-		out.ModelDoubted = doubted
-		log("withheld %d span(s) the model itself judged unlikely to be speech: "+
-			"given silence it produces a plausible sentence and hands it over without a hedge. "+
-			"Some of those words may have been real and merely unclear — they are in %s "+
-			"with the probability, rather than thrown away", doubted, JSONName)
-	}
-
 	Sort(out.Lines)
-	Sort(out.Withheld)
 
 	kept, echoes := SuppressBleed(out.Lines)
 	out.Lines = kept
@@ -309,6 +289,42 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 					"level while the other side was talking, which is the far end arriving through the air", n, quietMarginDB)
 			}
 		}
+	}
+
+	// Model doubt last, and only on what the echo detectors did not claim.
+	//
+	// It used to run first, which meant a borderline value decided cases the
+	// echo detector was built for. Measured on a real recording: an echo was
+	// withheld on a no-speech probability of 0.6001495718955994 against a 0.6
+	// threshold — a margin of 0.00015, four hundredths of a percent of the way
+	// from the threshold to certainty. The outcome was right and it was right
+	// by luck; a slightly different room or mic gain flips it and the far end
+	// is published as the operator.
+	//
+	// So the robust test decides first, and the model's own doubt is what
+	// catches what remains — chiefly invention over silence, where there is no
+	// far end to compare against and nothing else can catch it.
+	var doubted int
+	surviving := make([]Line, 0, len(out.Lines))
+	for _, l := range out.Lines {
+		if l.NoSpeechProb >= noSpeechThreshold {
+			doubted++
+			l.Suppressed = fmt.Sprintf("the model put %.3f probability on this span containing no speech", l.NoSpeechProb)
+			out.Withheld = append(out.Withheld, l)
+			continue
+		}
+		surviving = append(surviving, l)
+	}
+	out.Lines = surviving
+	Sort(out.Withheld)
+
+	if doubted > 0 {
+		out.ModelDoubted = doubted
+		log("withheld %d span(s) the model itself judged unlikely to be speech, after the "+
+			"echo tests had already claimed what they could. Given silence a model produces "+
+			"a plausible sentence and hands it over without a hedge; some of those words may "+
+			"instead have been real and merely unclear. They are in %s with the probability, "+
+			"rather than thrown away", doubted, JSONName)
 	}
 
 	if dropped > 0 {

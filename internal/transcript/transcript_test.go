@@ -592,3 +592,65 @@ func TestWithheldSpanCarriesTheRawProbability(t *testing.T) {
 		t.Errorf("recorded %v, want the model's own %v — precision was lost", got, raw)
 	}
 }
+
+// The robust test must decide before the fragile one.
+//
+// Measured on a real recording: an echo of the far end was withheld on a
+// no-speech probability of 0.6001495718955994 against a 0.6 threshold — a
+// margin of 0.00015. The outcome was right and it was right by luck. A slightly
+// different room or microphone gain flips it, and the far end is published as
+// the operator.
+//
+// So a line that is both an echo and marginally doubted must be withheld as an
+// echo, by the test built for it, not by a coin-flip on a threshold.
+func TestEchoDecidesBeforeMarginalModelDoubt(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic":    {{Index: 0, File: "mic-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 480000, PeakDBFS: -8}},
+		"system": {{Index: 0, File: "system-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 441000, PeakDBFS: -8}},
+	})
+	const marginal = 0.6001495718955994
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"system-000.wav": {{Start: 0, End: 6, Text: "We agree to ship the recorder on Thursday and Karen owns the migration notes.", NoSpeechProb: 0.001}},
+		"mic-000.wav":    {{Start: 0, End: 6, Text: "We agree to ship the recorder on Thursday and Karen owns the migration notes.", NoSpeechProb: marginal}},
+	}}
+
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Withheld) != 1 {
+		t.Fatalf("withheld %d, want 1", len(tr.Withheld))
+	}
+	if !strings.Contains(tr.Withheld[0].Suppressed, "echo") {
+		t.Errorf("withheld for %q — a marginal probability decided a case the echo test owns",
+			tr.Withheld[0].Suppressed)
+	}
+	if tr.ModelDoubted != 0 {
+		t.Errorf("ModelDoubted = %d; the echo test should have claimed it first", tr.ModelDoubted)
+	}
+	// The raw judgement still travels, so the margin is inspectable.
+	if tr.Withheld[0].NoSpeechProb != marginal {
+		t.Errorf("the model's value was lost: %v", tr.Withheld[0].NoSpeechProb)
+	}
+}
+
+// And invention over silence still has to be caught, because there is no far
+// end to compare it against and nothing else can catch it.
+func TestModelDoubtStillCatchesInventionOverSilence(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 480000, PeakDBFS: -55}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 1, End: 10, Text: "Department of Education.", NoSpeechProb: 0.908}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.ModelDoubted != 1 {
+		t.Fatalf("ModelDoubted = %d, want 1 — nothing else can catch invention over silence", tr.ModelDoubted)
+	}
+	if len(tr.Lines) != 0 {
+		t.Errorf("published %d invented line(s)", len(tr.Lines))
+	}
+}

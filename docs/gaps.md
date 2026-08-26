@@ -108,6 +108,24 @@ disclosure gets noticed, a fabricated quote gets believed.** Putting words in
 somebody's mouth is a worse trust failure than the ones this project already
 takes seriously, and it carried no uncertainty marker at all.
 
+### ~~A threshold decided cases the echo detector was built for~~ — reordered
+
+The model's doubt used to be applied before echo detection. That put a threshold
+on a continuous value in charge of borderline cases: measured on a real
+recording, an echo was withheld on a no-speech probability of
+**0.6001495718955994** against a **0.6** cutoff. A margin of 0.00015. The
+outcome was right and it was right by luck — a slightly different room or
+microphone gain flips it and the far end is published as the operator.
+
+Echo detection now decides first, because it compares two recordings of the same
+room rather than thresholding one number. The model's doubt catches what
+remains: chiefly invention over silence, where there is no far end to compare
+against and nothing else can catch it.
+
+Found by a reviewing session that measured the margin rather than accepting the
+outcome. The number that made it visible only existed because the same session
+had earlier asked why a probability printed as exactly `0.600`.
+
 ### Speaker labels are only as good as the far-end capture
 
 Found by the `wsl` session reviewing two app-scoped recordings. When the far-end
