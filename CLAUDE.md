@@ -222,7 +222,12 @@ own directory, so "can open it" means "is already this user" — **no credential
 no enrolment**.
 
 Which project the notes belong to is a **judgment call, and a session makes
-it**, not this program. That is the whole reason a worker is driven by a core
+it**, not this program. The default destination is therefore **this node's own
+core session**: delivering there keeps the transcript on the machine that made
+it and puts a session with a person behind it in the loop, which is the judgment
+happening rather than being skipped. A recording bound anywhere else is stored
+and waits, because sending a meeting to another project is publishing rather
+than filing. That is the whole reason a worker is driven by a core
 session rather than deciding for itself. The same applies to what mattered in
 the meeting: `deliver` carries the transcript and the ask, and refuses without a
 named destination rather than guessing one.

@@ -68,6 +68,39 @@ handled; they are aligned by timestamp, not by sample count.
 
 ## Recording
 
+### Where the notes will go
+
+Name it when you start, because that is when you know what the meeting is about:
+
+```
+$ minutes start --name "vendor call" --to homelab
+```
+
+Leave `--to` off and it goes to **this machine's own session** — the `wsl` core
+session here, discovered from the node directory shabadoo keeps beside its
+socket. That default is the safe one, and the reason is worth understanding:
+
+**Delivering to your own machine's session is not publishing.** The transcript
+stays on the machine that made it, and a session with a person behind it reads
+it and decides where the notes actually belong. Delivering to another project
+hands a meeting to somebody else.
+
+So a recording bound for the core session is **delivered automatically** once it
+has been transcribed. One bound for any other project is stored and waits, and
+`minutes deliver` picks the destination up so nobody retypes it:
+
+```
+$ minutes stop
+...
+not delivering automatically: "xinthesys" is not this machine's own session, and
+sending a meeting to another project is publishing rather than filing.
+Use `minutes deliver`.
+```
+
+Automatic delivery also stops if the transcript has stretches where the far end
+was silent, for the same reason `minutes deliver` refuses them: those may be the
+room rather than the meeting.
+
 ### The usual way: start, and walk away
 
 ```
@@ -278,8 +311,16 @@ Configure at `~/.config/minutes/config.json` (override the path with
 | `device` | `cuda` or `cpu`, local only. |
 | `afterStop` | Transcribe automatically in the background when a recording stops. Default `true`. |
 
-Retention lives beside it under `retention`: `keepDays`, `keepCount`,
-`keepUndelivered`. All off by default.
+Delivery lives under `delivery`:
+
+| Field | Meaning |
+|---|---|
+| `to` | Default destination. Defaults to this machine's own session. |
+| `coreSession` | The destination allowed to receive a meeting automatically. |
+| `auto` | Deliver to the core session once transcribed. Default `true`. |
+
+Retention lives under `retention`: `keepDays`, `keepCount`, `keepUndelivered`.
+All off by default.
 | `baseUrl` | Points a hosted backend at anything OpenAI-compatible. |
 | `apiKeyEnv` | *Name of* the environment variable holding the key — never the key itself, because a config file gets copied, committed and pasted into bug reports. |
 
@@ -444,7 +485,7 @@ retry; find the loop.
 | Command | What it does |
 |---|---|
 | `minutes preflight` | Report whether both tracks could be captured now. Non-zero if not. |
-| `minutes start [--name N] [--segment 5m] [--root DIR] [--force]` | Begin recording and return. Refuses if one is running or the disk is low. |
+| `minutes start [--name N] [--to PROJECT] [--segment 5m] [--force]` | Begin recording and return. `--to` defaults to this machine's own session. |
 | `minutes stop [ID] [--root DIR]` | Stop and report. Defaults to the running one. |
 | `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
 | `minutes list [--root DIR]` | List recordings with size, transcript and delivery. `●` marks a live one. |

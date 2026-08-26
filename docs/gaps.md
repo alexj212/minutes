@@ -264,6 +264,21 @@ proven — see below — and what it exposed is listed as a gap of its own.*
 
 ---
 
+### Automatic delivery cannot see background room audio
+
+Delivery to this machine's own session happens by itself once a transcript
+exists, and stops if the transcript carries far-end-silent stretches. That guard
+catches a **dropped call**. It does not catch somebody in the room while the
+meeting is running: the far end is talking, so nothing is flagged.
+
+The mitigation is the destination rather than the check. An automatic delivery
+goes only to the local core session, where the transcript stays on the machine
+that made it and a session with a person behind it reads it before anything
+reaches another project. Anything bound elsewhere waits for `minutes deliver`.
+
+That is a containment, not a solution. Process-specific loopback would be the
+solution.
+
 ## What to fix next
 
 The four highest-cost items from the first real meeting are done: notes can be

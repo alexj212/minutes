@@ -156,6 +156,11 @@ type Manifest struct {
 	// Transcript records that this recording has been transcribed, and how.
 	Transcript *TranscriptRecord `json:"transcript,omitempty"`
 
+	// IntendedFor is where this meeting's notes are meant to go, named when the
+	// recording started. Captured then because that is when somebody knows what
+	// the meeting is about; two hours later the context has drained away.
+	IntendedFor string `json:"intendedFor,omitempty"`
+
 	// Delivery records that the notes were handed to a session. Kept so that
 	// "did I send this one?" is answerable from the recording rather than from
 	// memory.
@@ -293,6 +298,14 @@ func (m *Manifest) SetState(st State) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.State = st
+	return m.saveLocked()
+}
+
+// SetIntendedFor records where the notes are meant to go, and saves.
+func (m *Manifest) SetIntendedFor(to string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.IntendedFor = to
 	return m.saveLocked()
 }
 

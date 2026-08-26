@@ -78,9 +78,10 @@ func usage() {
         Report whether a recording started now would capture both tracks.
         Exits non-zero if it would not.
 
-  minutes start [--name NAME] [--segment 5m] [--root DIR] [--force]
+  minutes start [--name NAME] [--to PROJECT] [--segment 5m] [--force]
         Begin recording and return. The recording outlives this command.
-        Refuses if something is already recording, or if the disk is too full.
+        --to names where the notes should go; it defaults to this machine's
+        own session, and is delivered there automatically once transcribed.
 
   minutes stop [ID] [--root DIR]
         Stop a recording and report what it captured. Defaults to the one
@@ -245,6 +246,7 @@ func cmdStart(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "start even if another recording is running")
+	to := fs.String("to", "", "where the notes should go (default: this machine's own session)")
 	parseFlags(fs, args)
 
 	helper := readyToRecord(context.Background(), *root, *force)
@@ -259,6 +261,12 @@ func cmdStart(args []string) int {
 		fmt.Fprintf(os.Stderr, "could not start recording: %v\n", err)
 		return 1
 	}
+	dest := destination(*to)
+	if dest != "" {
+		if err := m.SetIntendedFor(dest); err != nil {
+			fmt.Fprintf(os.Stderr, "recording the destination: %v\n", err)
+		}
+	}
 
 	// Recording is a trust matter, and in some places a legal one. A recording
 	// that runs detached is exactly the one that could become quiet, so this
@@ -266,7 +274,11 @@ func cmdStart(args []string) int {
 	banner()
 	fmt.Printf("  id:       %s\n", m.ID)
 	fmt.Printf("  files:    %s\n", m.Dir())
-	fmt.Printf("  segments: %s\n\n", seg.String())
+	fmt.Printf("  segments: %s\n", seg.String())
+	if dest != "" {
+		fmt.Printf("  notes to: %s\n", dest)
+	}
+	fmt.Println()
 	fmt.Printf("  stop with:  minutes stop %s\n", m.ID)
 	return 0
 }
@@ -632,6 +644,7 @@ func cmdRecord(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "record even if another recording is running")
+	to := fs.String("to", "", "where the notes should go (default: this machine's own session)")
 	parseFlags(fs, args)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -649,6 +662,9 @@ func cmdRecord(args []string) int {
 		return 1
 	}
 	m := manifest.New(dir, id, *name, seg.Seconds())
+	if dest := destination(*to); dest != "" {
+		m.IntendedFor = dest
+	}
 	if err := m.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -688,10 +704,14 @@ func cmdRecord(args []string) int {
 	} else if cfg.Transcription.AfterStop {
 		fmt.Printf("\n  transcribing — about %s. Ctrl-C to leave it for `minutes transcribe` later.\n\n",
 			roughly(transcribeSeconds(m.Duration())))
-		if err := transcribeInto(ctx, m, cfg, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }); err != nil {
+		log := func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
+		if err := transcribeInto(ctx, m, cfg, log); err != nil {
 			fmt.Fprintf(os.Stderr, "  transcription failed (the recording is intact): %v\n", err)
-		} else if t, lerr := transcript.Load(m.Dir()); lerr == nil {
-			fmt.Printf("\n  %d lines -> %s\n", len(t.Lines), filepath.Join(m.Dir(), transcript.TextName))
+		} else {
+			if t, lerr := transcript.Load(m.Dir()); lerr == nil {
+				fmt.Printf("\n  %d lines -> %s\n", len(t.Lines), filepath.Join(m.Dir(), transcript.TextName))
+			}
+			autoDeliver(ctx, m, cfg, log)
 		}
 	}
 	return rc
@@ -812,12 +832,6 @@ func cmdDeliver(args []string) int {
 	noNotify := fs.Bool("no-notify", false, "do not send a human notification")
 	ids := parseFlags(fs, args)
 
-	if *to == "" {
-		fmt.Fprintln(os.Stderr, "deliver needs --to: which project the notes belong to is a judgment call,")
-		fmt.Fprintln(os.Stderr, "and this program deliberately does not make it. Name the project.")
-		return 2
-	}
-
 	dir, err := session.Resolve(*root, first(ids))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
@@ -827,6 +841,23 @@ func cmdDeliver(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
+	}
+
+	// Where it goes: what was asked for, then what the recording was started
+	// with, then this machine's own session. Nothing is guessed — every one of
+	// those was named by a person at some point.
+	target := *to
+	if target == "" {
+		target = m.IntendedFor
+	}
+	if target == "" {
+		target = destination("")
+	}
+	if target == "" {
+		fmt.Fprintln(os.Stderr, "deliver needs --to: which project the notes belong to is a judgment call,")
+		fmt.Fprintln(os.Stderr, "and this program deliberately does not make it. Name the project,")
+		fmt.Fprintln(os.Stderr, "or set delivery.to in the config, or pass --to when starting a recording.")
+		return 2
 	}
 
 	var title, body, notifyBody string
@@ -883,7 +914,7 @@ func cmdDeliver(args []string) int {
 
 	client := deliver.New()
 	err = client.Send(ctx, deliver.Message{
-		To: *to, From: *from, Tag: "minutes", Title: title, Body: body,
+		To: target, From: *from, Tag: "minutes", Title: title, Body: body,
 	})
 
 	if errors.Is(err, deliver.ErrUnreachable) {
@@ -895,7 +926,7 @@ func cmdDeliver(args []string) int {
 			fmt.Fprintf(os.Stderr, "agent unreachable, and writing the brief failed too: %v\n", werr)
 			return 1
 		}
-		if serr := m.SetDelivery(manifest.DeliveryRecord{To: *to, At: time.Now(), Degraded: true}); serr != nil {
+		if serr := m.SetDelivery(manifest.DeliveryRecord{To: target, At: time.Now(), Degraded: true}); serr != nil {
 			fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 		}
 		fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
@@ -912,13 +943,13 @@ func cmdDeliver(args []string) int {
 		fmt.Fprintf(os.Stderr, "delivery failed: %v\n", err)
 		return 1
 	}
-	if serr := m.SetDelivery(manifest.DeliveryRecord{To: *to, At: time.Now()}); serr != nil {
+	if serr := m.SetDelivery(manifest.DeliveryRecord{To: target, At: time.Now()}); serr != nil {
 		fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 	}
 	if *notesFile != "" {
-		fmt.Printf("  notes delivered to %s (no transcript sent)\n", *to)
+		fmt.Printf("  notes delivered to %s (no transcript sent)\n", target)
 	} else {
-		fmt.Printf("  notes requested from %s\n", *to)
+		fmt.Printf("  notes requested from %s\n", target)
 	}
 
 	if !*noNotify {
@@ -989,11 +1020,13 @@ func cmdSupervise(args []string) int {
 		if err := m.SetState(manifest.StateTranscribing); err != nil {
 			fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
 		}
-		if err := transcribeInto(context.Background(), m, cfg,
-			func(f string, a ...any) { fmt.Printf(f+"\n", a...) }); err != nil {
+		log := func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+		if err := transcribeInto(context.Background(), m, cfg, log); err != nil {
 			// A failed transcript is not a failed recording. The audio is on
 			// disk and `minutes transcribe` can be run again.
 			fmt.Fprintf(os.Stderr, "transcription failed (the recording is intact): %v\n", err)
+		} else {
+			autoDeliver(context.Background(), m, cfg, log)
 		}
 	}
 
@@ -1005,6 +1038,63 @@ func cmdSupervise(args []string) int {
 	os.Remove(filepath.Join(*dir, session.PIDFile))
 	fmt.Println("stopped cleanly")
 	return 0
+}
+
+// autoDeliver hands a finished recording to this node's own session, if that is
+// safe to do without asking.
+//
+// Safe means three things, and all of them have to hold. There has to be a
+// destination; it has to be the core session, because delivering there keeps
+// the transcript on the machine that made it while sending to another project
+// is publishing; and the transcript must carry no stretches where the far end
+// was silent, since those may be the room rather than the meeting.
+//
+// Anything else waits for `minutes deliver`, which will pick up the stored
+// destination so nobody has to remember it.
+func autoDeliver(ctx context.Context, m *manifest.Manifest, cfg *config.Config, log func(string, ...any)) {
+	if !cfg.Delivery.Auto {
+		return
+	}
+	to := m.IntendedFor
+	if to == "" {
+		to = cfg.Delivery.To
+	}
+	if to == "" {
+		return
+	}
+	if cfg.Delivery.CoreSession == "" || to != cfg.Delivery.CoreSession {
+		log("not delivering automatically: %q is not this machine's own session, and sending "+
+			"a meeting to another project is publishing rather than filing. Use `minutes deliver`.", to)
+		return
+	}
+
+	t, err := transcript.Load(m.Dir())
+	if err != nil {
+		return
+	}
+	if len(t.FarEndSilent) > 0 {
+		log("not delivering automatically: %d stretch(es) are marked where the other side was "+
+			"silent, so what was recorded there may be the room rather than the meeting. "+
+			"Read it, then deliver by hand.", len(t.FarEndSilent))
+		return
+	}
+
+	brief := deliver.Brief{Recording: m, Transcript: t}
+	client := deliver.New()
+	if err := client.Send(ctx, deliver.Message{
+		To: to, From: "minutes", Tag: "minutes",
+		Title: brief.Title(), Body: brief.Body(),
+	}); err != nil {
+		// Never fatal. The recording is on disk and `minutes deliver` can send
+		// it later; a recorder that failed because a coordinator blipped would
+		// be worse than one that never integrated.
+		log("could not deliver to %s (%v); the recording is on disk and `minutes deliver` will send it", to, err)
+		return
+	}
+	if err := m.SetDelivery(manifest.DeliveryRecord{To: to, At: time.Now()}); err != nil {
+		log("recording the delivery: %v", err)
+	}
+	log("delivered to %s", to)
 }
 
 // transcribeInto transcribes a recording and records the result. Shared by the
@@ -1037,6 +1127,19 @@ func slug(name string) string {
 }
 
 var nonAlnum = regexp.MustCompile(`[^a-zA-Z0-9]+`)
+
+// destination resolves where a recording's notes should go: what was asked for,
+// or this machine's own session.
+func destination(asked string) string {
+	if asked != "" {
+		return asked
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return ""
+	}
+	return cfg.Delivery.To
+}
 
 // first returns the first element, or "" — the commands take an optional id.
 func first(ids []string) string {

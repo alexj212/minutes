@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/alexj/minutes/internal/deliver"
 	"github.com/alexj/minutes/internal/session"
 	"github.com/alexj/minutes/internal/transcribe"
 )
@@ -40,9 +41,27 @@ type Transcription struct {
 	APIKeyEnv string `json:"apiKeyEnv,omitempty"`
 }
 
+// Delivery decides where a meeting's notes go, and whether they go by
+// themselves.
+type Delivery struct {
+	// To is the default destination when `--to` is not given. It defaults to
+	// this node's own core session, which is the safe answer: delivering there
+	// keeps the transcript on the machine that made it and puts a session with
+	// a person behind it in the loop.
+	To string `json:"to,omitempty"`
+	// CoreSession names the destination that may receive a meeting
+	// automatically. Anything else waits for somebody to ask, because sending
+	// to another project is publishing rather than filing.
+	CoreSession string `json:"coreSession,omitempty"`
+	// Auto delivers to the core session once a transcript exists, provided the
+	// transcript carries no stretches where the far end was silent.
+	Auto bool `json:"auto"`
+}
+
 // Config is the whole of it.
 type Config struct {
 	Transcription Transcription     `json:"transcription"`
+	Delivery      Delivery          `json:"delivery"`
 	Retention     session.Retention `json:"retention"`
 }
 
@@ -58,8 +77,10 @@ func Path() string {
 	return filepath.Join(home, ".config", "minutes", "config.json")
 }
 
-// Default is what runs when nobody has said otherwise: everything stays here.
+// Default is what runs when nobody has said otherwise: everything stays here,
+// and a meeting goes to this machine's own session.
 func Default() *Config {
+	core := deliver.CoreSession()
 	return &Config{
 		Transcription: Transcription{
 			Backend:   transcribe.BackendLocalWhisper,
@@ -67,6 +88,11 @@ func Default() *Config {
 			Language:  "en",
 			Device:    "cuda",
 			AfterStop: true,
+		},
+		Delivery: Delivery{
+			To:          core,
+			CoreSession: core,
+			Auto:        true,
 		},
 		// Off. Deleting somebody's meetings without being asked is worse than
 		// using their disk, so retention is opt-in — but when it is turned on,
