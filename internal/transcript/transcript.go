@@ -92,9 +92,24 @@ type Transcript struct {
 	// BleedSuppressed counts microphone lines dropped as echoes of the system
 	// track. A large number means the meeting was played through speakers.
 	BleedSuppressed int `json:"bleedSuppressed,omitempty"`
-	// Invented counts spans the model itself flagged as probably not speech,
-	// whose words were discarded rather than attributed to anybody.
-	Invented int `json:"invented,omitempty"`
+	// AttributionUnreliable explains why the speaker labels below cannot be
+	// trusted, and is empty when they can.
+	//
+	// Speaker attribution rests entirely on the two tracks holding different
+	// audio. If the far-end track did not capture the far end — the wrong
+	// application was targeted, or it was muted — then the microphone's
+	// acoustic pickup of the far end has nothing to be compared against, and it
+	// is published as the operator. Real words, wrong mouth, and the operator's
+	// is the worst one to get wrong.
+	AttributionUnreliable string `json:"attributionUnreliable,omitempty"`
+	// ModelDoubted counts spans the model judged unlikely to contain speech.
+	//
+	// Not "invented": the model doubting a span does not establish that the
+	// words were fabricated. Some are — given silence it produces a sentence —
+	// and some are real speech that was merely unclear. Collapsing the two into
+	// one counter would hide whichever turns out to be rarer, so this says what
+	// was measured rather than what it was assumed to mean.
+	ModelDoubted int `json:"modelDoubted,omitempty"`
 	// Withheld holds every line that was dropped, and why.
 	//
 	// Three passes can now remove a line — an echo of the far end, a quiet
@@ -201,16 +216,33 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 		AudioLeftMachine: t.SendsAudioOffMachine(),
 		Recorded:         m.Recorded,
 	}
-	var invented int
+	// A model can report an end past the end of the audio. Left alone that
+	// stamps a line as running beyond the recording — observed: 12.06s on a
+	// 9.98s file — which makes a transcript disagree with its own manifest.
+	trackEnd := map[string]float64{}
+	for _, track := range m.Tracks {
+		trackEnd[track.Name] = track.Duration()
+	}
+
+	var doubted int
 	for i, j := range jobs {
 		for _, u := range results[i] {
+			start := j.start + u.Start
+			end := j.start + u.End
+			// Clamp only when the track is genuinely longer than where this
+			// line begins. A limit below the start would move the end before
+			// it, which is worse than an end that overruns — and it means the
+			// track metadata is wrong, not the model.
+			if limit, ok := trackEnd[j.track]; ok && limit > start && end > limit {
+				end = limit
+			}
 			line := Line{
 				// Segment-relative times become absolute here. This is the
 				// only place the two tracks are related to each other, and it
 				// is arithmetic because the segments were cut on a shared
 				// clock in the first place.
-				Start:   j.start + u.Start,
-				End:     j.start + u.End,
+				Start:   start,
+				End:     end,
 				Track:   j.track,
 				Speaker: speakerFor(j.track),
 				Text:    u.Text,
@@ -219,19 +251,20 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			// it, rather than publishing what it invented anyway — but write
 			// down what it said and why it went.
 			if u.NoSpeechProb >= noSpeechThreshold {
-				invented++
-				line.Suppressed = fmt.Sprintf("the model reported %.3f confidence that this was not speech", u.NoSpeechProb)
+				doubted++
+				line.Suppressed = fmt.Sprintf("the model put %.3f probability on this span containing no speech", u.NoSpeechProb)
 				out.Withheld = append(out.Withheld, line)
 				continue
 			}
 			out.Lines = append(out.Lines, line)
 		}
 	}
-	if invented > 0 {
-		out.Invented = invented
-		log("discarded %d line(s) the model itself flagged as probably not speech: "+
-			"given silence it invents a plausible sentence and hands it over without a hedge, "+
-			"and those words would have been attributed to somebody", invented)
+	if doubted > 0 {
+		out.ModelDoubted = doubted
+		log("withheld %d span(s) the model itself judged unlikely to be speech: "+
+			"given silence it produces a plausible sentence and hands it over without a hedge. "+
+			"Some of those words may have been real and merely unclear — they are in %s "+
+			"with the probability, rather than thrown away", doubted, JSONName)
 	}
 
 	Sort(out.Lines)
@@ -272,6 +305,12 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			"this meeting was on speakers rather than headphones, so the microphone "+
 			"also heard the far end", dropped)
 	}
+	// Whether the speaker labels can be trusted at all. This is a precondition
+	// for attribution, not a quality check: when the far-end track holds no
+	// speech, echo suppression has no reference and the room is published as
+	// the operator.
+	checkAttribution(m, out, log)
+
 	out.FarEndSilent = findFarEndSilence(out.Lines)
 	markFarEndSilence(out.Lines, out.FarEndSilent)
 	for _, g := range out.FarEndSilent {
@@ -280,6 +319,48 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			clock(g.Start), roughMinutes(g.Duration()), g.Lines)
 	}
 	return out, nil
+}
+
+// checkAttribution decides whether the speaker labels mean anything.
+//
+// The test is the far-end track's crest factor, because level alone does not
+// separate "captured the meeting quietly" from "captured a tone at a healthy
+// level". Speech runs 15 to 20 dB between peak and average; a pure tone is
+// 3.01; steady noise is around 10.
+func checkAttribution(m *manifest.Manifest, out *Transcript, log func(string, ...any)) {
+	far, ok := trackNamed(m, "system")
+	if !ok || far.Duration() <= 0 {
+		return
+	}
+	// Only worth asking if the microphone actually produced lines. With nothing
+	// attributed to anybody there is nothing to mislabel.
+	micLines := 0
+	for _, l := range out.Lines {
+		if l.Track == "mic" {
+			micLines++
+		}
+	}
+	if micLines == 0 {
+		return
+	}
+
+	lr := newLevelReader(m.Dir(), m.SegmentSeconds, far)
+	crest, ok := crestDB(lr, far.Duration())
+	if !ok || crest >= speechCrestDB {
+		return
+	}
+
+	what := "the far-end track"
+	if m.App != "" {
+		what = fmt.Sprintf("the %s track", m.App)
+	}
+	out.AttributionUnreliable = fmt.Sprintf(
+		"%s has a peak-to-average ratio of %.1f dB, and speech runs 15 to 20. "+
+			"It did not capture speech, so anything the microphone picked up acoustically "+
+			"has nothing to be compared against and is labelled as you. "+
+			"%d line(s) below carry that label and may be the far end.",
+		what, crest, micLines)
+	log("WARNING: %s", out.AttributionUnreliable)
 }
 
 // trackNamed finds a track's format in the manifest.
@@ -338,6 +419,13 @@ func (t *Transcript) Text() string {
 	fmt.Fprintf(&b, "# Transcribed by %s; audio %s this machine.\n\n",
 		t.Backend, map[bool]string{true: "was sent off", false: "stayed on"}[t.AudioLeftMachine])
 
+	if t.AttributionUnreliable != "" {
+		b.WriteString("#\n# ⚠ SPEAKER LABELS BELOW ARE NOT RELIABLE\n#\n")
+		for _, line := range strings.Split(wrapAt(t.AttributionUnreliable, 72), "\n") {
+			fmt.Fprintf(&b, "# %s\n", line)
+		}
+		b.WriteString("#\n")
+	}
 	if len(t.Withheld) > 0 {
 		fmt.Fprintf(&b, "# %d line(s) were withheld — echoes of the far end, or spans the model\n"+
 			"# said were not speech. They are in %s with the reason for each.\n\n",
@@ -366,6 +454,24 @@ func (t *Transcript) Text() string {
 		fmt.Fprintf(&b, "[%s] %-6s %s\n", clock(l.Start), l.Speaker+":", l.Text)
 	}
 	return b.String()
+}
+
+// wrapAt breaks text so a warning in a comment block stays readable.
+func wrapAt(s string, width int) string {
+	var out strings.Builder
+	line := 0
+	for i, w := range strings.Fields(s) {
+		if line > 0 && line+1+len(w) > width {
+			out.WriteString("\n")
+			line = 0
+		} else if i > 0 && line > 0 {
+			out.WriteString(" ")
+			line++
+		}
+		out.WriteString(w)
+		line += len(w)
+	}
+	return out.String()
 }
 
 func clock(seconds float64) string {

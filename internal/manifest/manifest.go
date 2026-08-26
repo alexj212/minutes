@@ -84,14 +84,27 @@ type Track struct {
 	// Reanchors counts how often this track's device clock disagreed with the
 	// wall clock by more than jitter. Non-zero means the timeline was rebuilt
 	// mid-recording, which a phase merging transcripts should know.
-	Reanchors int `json:"reanchors,omitempty"`
+	//
+	// Always written, never omitted. On a diagnostic field, absent and zero
+	// mean different things — "measured, and it never happened" against "not
+	// measured, or no longer reported" — and a reader cannot tell them apart
+	// from a field that vanishes when it is zero.
+	Reanchors int `json:"reanchors"`
 }
 
 // Duration is how far this track's segments reach.
+//
+// Falls back to the frame count when a segment carries no duration of its own.
+// Returning a length shorter than the audio actually present is worse than
+// returning nothing: anything that clamps to this would silently truncate.
 func (t Track) Duration() float64 {
 	var end float64
 	for _, s := range t.Segments {
-		if e := s.StartSeconds + s.DurationSeconds; e > end {
+		length := s.DurationSeconds
+		if length == 0 && s.Frames > 0 && t.SampleRate > 0 {
+			length = float64(s.Frames) / float64(t.SampleRate)
+		}
+		if e := s.StartSeconds + length; e > end {
 			end = e
 		}
 	}

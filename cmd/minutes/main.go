@@ -1158,6 +1158,18 @@ func autoDeliver(ctx context.Context, m *manifest.Manifest, cfg *config.Config, 
 	if to == "" {
 		return
 	}
+	// The same refusal the manual path makes. A delivered message names these
+	// paths and is read later; sending from a directory that will not survive
+	// produces a message pointing at nothing.
+	//
+	// This guard was on `minutes deliver` and not here, so every automatic
+	// delivery from a temporary directory went out unchecked — which cost a
+	// reviewing session the verification on two separate runs.
+	if session.IsVolatile(m.Dir()) {
+		log("not delivering automatically: %s is temporary, and the message would name "+
+			"paths that will not be there when somebody reads it", m.Dir())
+		return
+	}
 	if cfg.Delivery.CoreSession == "" || to != cfg.Delivery.CoreSession {
 		log("not delivering automatically: %q is not this machine's own session, and sending "+
 			"a meeting to another project is publishing rather than filing. Use `minutes deliver`.", to)

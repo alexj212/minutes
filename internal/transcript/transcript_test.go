@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -299,8 +300,8 @@ func TestModelFlaggedNonSpeechIsDiscarded(t *testing.T) {
 	if len(tr.Lines) != 1 || tr.Lines[0].Text != "something actually said" {
 		t.Fatalf("lines = %+v, want only the real one", tr.Lines)
 	}
-	if tr.Invented != 1 {
-		t.Errorf("Invented = %d, want 1 — a discarded line must be counted, not hidden", tr.Invented)
+	if tr.ModelDoubted != 1 {
+		t.Errorf("ModelDoubted = %d, want 1 — a discarded line must be counted, not hidden", tr.ModelDoubted)
 	}
 }
 
@@ -323,8 +324,8 @@ func TestConfidentSpeechIsKept(t *testing.T) {
 	if len(tr.Lines) != 2 {
 		t.Fatalf("kept %d lines, want 2 — confident speech was filtered", len(tr.Lines))
 	}
-	if tr.Invented != 0 {
-		t.Errorf("Invented = %d, want 0", tr.Invented)
+	if tr.ModelDoubted != 0 {
+		t.Errorf("ModelDoubted = %d, want 0", tr.ModelDoubted)
 	}
 }
 
@@ -360,7 +361,7 @@ func TestWithheldLinesAreKeptWithTheirReason(t *testing.T) {
 	if w.Suppressed == "" {
 		t.Error("a withheld line does not say why it went")
 	}
-	if !strings.Contains(w.Suppressed, "not speech") {
+	if !strings.Contains(w.Suppressed, "no speech") {
 		t.Errorf("the reason does not explain itself: %q", w.Suppressed)
 	}
 
@@ -397,5 +398,169 @@ func TestSuppressedEchoesAreRecorded(t *testing.T) {
 	}
 	if tr.Withheld[0].Track != "mic" {
 		t.Errorf("withheld the %s track; only the microphone copy should go", tr.Withheld[0].Track)
+	}
+}
+
+// A model can report an end past the end of the audio. Observed on a real
+// recording: a span stamped 12.06s on a 9.98s file, and later 10.083s on a
+// 9.973s one. Harmless where it was seen, and not harmless at all for anything
+// that seeks to those offsets.
+func TestLineEndIsClampedToTheTrack(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0,
+			DurationSeconds: 9.973, Frames: 478704, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 5.14, End: 12.06, Text: "runs past the end", NoSpeechProb: 0.001}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Lines) != 1 {
+		t.Fatalf("got %d lines, want 1", len(tr.Lines))
+	}
+	if got := tr.Lines[0].End; got > 9.973 {
+		t.Errorf("line ends at %.3f on a 9.973s track — %.3fs past the audio it describes", got, got-9.973)
+	}
+	if tr.Lines[0].Start != 5.14 {
+		t.Errorf("start moved to %v; only the end should be clamped", tr.Lines[0].Start)
+	}
+}
+
+// Speaker attribution rests entirely on the two tracks holding different audio.
+// If the far-end track did not capture the far end — the wrong application was
+// targeted, or it was muted — then the microphone's acoustic pickup of the far
+// end has nothing to be compared against and is published as the operator.
+// Real words, wrong mouth, and the operator's is the worst one to get wrong.
+//
+// Measured on a real recording: a track that had captured a 440 Hz tone rather
+// than a meeting showed a 3.0 dB peak-to-average ratio, against 15-20 for
+// speech, and two lines of room echo were labelled "You".
+func TestAttributionIsFlaggedWhenTheFarEndHoldsNoSpeech(t *testing.T) {
+	dir := t.TempDir()
+	m := manifest.New(dir, "rec", "wrong target", 60)
+	m.App = "powershell.exe"
+	if err := m.SetTrack("system", "process 1 (powershell.exe)", 48000, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTrack("mic", "Mic", 48000, 2); err != nil {
+		t.Fatal(err)
+	}
+	// A pure tone on the far-end track: steady, so a 3 dB crest.
+	writeTone(t, filepath.Join(dir, "system-000.wav"), 48000, 2, 6, 440, 0.5)
+	writeTone(t, filepath.Join(dir, "mic-000.wav"), 48000, 2, 6, 300, 0.5)
+	for _, name := range []string{"system", "mic"} {
+		if err := m.PutSegment(name, manifest.Segment{
+			Index: 0, File: name + "-000.wav", StartSeconds: 0,
+			DurationSeconds: 6, Frames: 288000, PeakDBFS: -6, Complete: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 0, End: 3, Text: "words the room heard", NoSpeechProb: 0.001}},
+	}}
+
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.AttributionUnreliable == "" {
+		t.Fatal("a far-end track holding a steady tone did not flag attribution as unreliable")
+	}
+	for _, want := range []string{"peak-to-average", "labelled as you"} {
+		if !strings.Contains(tr.AttributionUnreliable, want) {
+			t.Errorf("the warning does not mention %q: %s", want, tr.AttributionUnreliable)
+		}
+	}
+	if !strings.Contains(tr.Text(), "NOT RELIABLE") {
+		t.Error("the readable transcript does not carry the warning")
+	}
+}
+
+// And speech on the far-end track must not trip it, or the warning becomes
+// noise and gets ignored on the recording that needs it.
+func TestSpeechLikeFarEndDoesNotFlagAttribution(t *testing.T) {
+	dir := t.TempDir()
+	m := manifest.New(dir, "rec", "ok", 60)
+	if err := m.SetTrack("system", "Speakers", 48000, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetTrack("mic", "Mic", 48000, 2); err != nil {
+		t.Fatal(err)
+	}
+	writeSpeechLike(t, filepath.Join(dir, "system-000.wav"), 48000, 2, 6)
+	writeTone(t, filepath.Join(dir, "mic-000.wav"), 48000, 2, 6, 300, 0.5)
+	for _, name := range []string{"system", "mic"} {
+		if err := m.PutSegment(name, manifest.Segment{
+			Index: 0, File: name + "-000.wav", StartSeconds: 0,
+			DurationSeconds: 6, Frames: 288000, PeakDBFS: -6, Complete: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 0, End: 3, Text: "something", NoSpeechProb: 0.001}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.AttributionUnreliable != "" {
+		t.Errorf("a speech-like far-end track was flagged: %s", tr.AttributionUnreliable)
+	}
+}
+
+// writeTone writes a steady sine: peak-to-average 3.01 dB by construction.
+func writeTone(t *testing.T, path string, rate, channels int, secs float64, hz, amp float64) {
+	t.Helper()
+	w, err := wav.NewWriter(path, rate, channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := int(secs * float64(rate))
+	buf := make([]int16, n*channels)
+	for i := 0; i < n; i++ {
+		v := int16(amp * 32767 * math.Sin(2*math.Pi*hz*float64(i)/float64(rate)))
+		for c := 0; c < channels; c++ {
+			buf[i*channels+c] = v
+		}
+	}
+	if err := w.WriteAt(0, buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeSpeechLike writes bursts separated by near-silence, which is what gives
+// speech its 15-20 dB peak-to-average ratio.
+func writeSpeechLike(t *testing.T, path string, rate, channels int, secs float64) {
+	t.Helper()
+	w, err := wav.NewWriter(path, rate, channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := int(secs * float64(rate))
+	buf := make([]int16, n*channels)
+	for i := 0; i < n; i++ {
+		// Loud for a twentieth of each period, quiet for the rest.
+		phase := float64(i%(rate/2)) / float64(rate/2)
+		amp := 0.004
+		if phase < 0.05 {
+			amp = 0.9
+		}
+		v := int16(amp * 32767 * math.Sin(2*math.Pi*220*float64(i)/float64(rate)))
+		for c := 0; c < channels; c++ {
+			buf[i*channels+c] = v
+		}
+	}
+	if err := w.WriteAt(0, buf); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

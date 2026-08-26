@@ -35,21 +35,21 @@ func newLevelReader(dir string, seg float64, t manifest.Track) *levelReader {
 	return &levelReader{dir: dir, seg: seg, spec: t}
 }
 
-// peakDBFS returns the loudest sample between start and end, in seconds from
-// the recording epoch, or ok=false when the range is not on disk.
-func (lr *levelReader) peakDBFS(start, end float64) (float64, bool) {
+// read returns the samples between start and end, in seconds from the recording
+// epoch, or ok=false when the range is not on disk.
+func (lr *levelReader) read(start, end float64) ([]int16, bool) {
 	if lr.spec.SampleRate == 0 || lr.spec.Channels == 0 || lr.seg <= 0 {
-		return 0, false
+		return nil, false
 	}
 	index := int(start / lr.seg)
 	within := start - float64(index)*lr.seg
 	if within < 0 {
-		return 0, false
+		return nil, false
 	}
 	// A range crossing a segment boundary is measured only up to it. Fragments
 	// are a second or so; losing the tail of one changes nothing.
 	if end-start <= 0 {
-		return 0, false
+		return nil, false
 	}
 	if within+(end-start) > lr.seg {
 		end = start + (lr.seg - within)
@@ -58,7 +58,7 @@ func (lr *levelReader) peakDBFS(start, end float64) (float64, bool) {
 	path := filepath.Join(lr.dir, fmt.Sprintf("%s-%03d.wav", lr.spec.Name, index))
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, false
+		return nil, false
 	}
 	defer f.Close()
 
@@ -67,20 +67,32 @@ func (lr *levelReader) peakDBFS(start, end float64) (float64, bool) {
 	off := wavHeaderSize + int64(within*rate)*blockAlign
 	n := int64((end-start)*rate) * blockAlign
 	if n <= 0 {
-		return 0, false
+		return nil, false
 	}
 
 	buf := make([]byte, n)
 	read, err := f.ReadAt(buf, off)
 	if read <= 0 {
-		return 0, false
+		return nil, false
 	}
 	_ = err // a short read at the end of a segment is fine; measure what is there
 	buf = buf[:read-read%2]
 
-	var peak int16
+	out := make([]int16, 0, len(buf)/2)
 	for i := 0; i+1 < len(buf); i += 2 {
-		v := int16(binary.LittleEndian.Uint16(buf[i:]))
+		out = append(out, int16(binary.LittleEndian.Uint16(buf[i:])))
+	}
+	return out, true
+}
+
+// peakDBFS returns the loudest sample in a range, in dBFS.
+func (lr *levelReader) peakDBFS(start, end float64) (float64, bool) {
+	samples, ok := lr.read(start, end)
+	if !ok {
+		return 0, false
+	}
+	var peak int16
+	for _, v := range samples {
 		if v == math.MinInt16 {
 			v = math.MaxInt16
 		} else if v < 0 {
@@ -137,4 +149,64 @@ func referenceLevel(lines []Line, lr *levelReader) (float64, bool) {
 		}
 	}
 	return levels[len(levels)/2], true
+}
+
+// rms returns the root-mean-square level of a range, in dBFS.
+func (lr *levelReader) rms(start, end float64) (float64, bool) {
+	samples, ok := lr.read(start, end)
+	if !ok || len(samples) == 0 {
+		return 0, false
+	}
+	var sum float64
+	for _, v := range samples {
+		f := float64(v) / 32767
+		sum += f * f
+	}
+	mean := math.Sqrt(sum / float64(len(samples)))
+	if mean <= 0 {
+		return silentDBFS, true
+	}
+	return 20 * math.Log10(mean), true
+}
+
+// speechCrestDB is the peak-to-RMS ratio below which a track is not carrying
+// speech, whatever else it is carrying.
+//
+// Speech is spiky: it runs 15 to 20 dB between its peaks and its average. A
+// pure tone is exactly 3.01 dB and steady noise around 10. Measured on a real
+// recording, a track that had captured a 440 Hz tone rather than a meeting came
+// out at 3.0, which is how it was identified.
+const speechCrestDB = 12.0
+
+// crestDB samples a track and returns its peak-to-RMS ratio.
+//
+// Sampled rather than measured whole: a two-hour recording is gigabytes, and
+// twenty windows spread across it answer the question just as well as all of it.
+func crestDB(lr *levelReader, duration float64) (float64, bool) {
+	const windows = 20
+	const window = 1.0
+	if duration < window {
+		return 0, false
+	}
+	peak, rmsSum, n := silentDBFS, 0.0, 0
+	for i := 0; i < windows; i++ {
+		at := duration * float64(i) / float64(windows)
+		if at+window > duration {
+			break
+		}
+		p, okP := lr.peakDBFS(at, at+window)
+		r, okR := lr.rms(at, at+window)
+		if !okP || !okR || r <= silentDBFS {
+			continue
+		}
+		if p > peak {
+			peak = p
+		}
+		rmsSum += r
+		n++
+	}
+	if n == 0 || peak <= silentDBFS {
+		return 0, false
+	}
+	return peak - rmsSum/float64(n), true
 }

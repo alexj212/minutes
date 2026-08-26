@@ -108,6 +108,33 @@ disclosure gets noticed, a fabricated quote gets believed.** Putting words in
 somebody's mouth is a worse trust failure than the ones this project already
 takes seriously, and it carried no uncertainty marker at all.
 
+### Speaker labels are only as good as the far-end capture
+
+Found by the `wsl` session reviewing two app-scoped recordings. When the far-end
+track does not hold the far end — the wrong application was targeted, or it was
+muted — the microphone's acoustic pickup of the far end has nothing to be
+compared against, so echo suppression has no reference and the room is published
+**as the operator**. Real words, wrong mouth, and the operator's is the worst
+one to get wrong.
+
+A capture failure and an attribution failure turn out to be the same event.
+
+The transcript now measures the far-end track's peak-to-average ratio, which
+separates "captured the meeting quietly" from "captured something steady at a
+healthy level" in a way that level alone cannot. Speech runs 15 to 20 dB; a pure
+tone is 3.01; steady noise about 10. Below 12 the transcript is headed:
+
+```
+# ⚠ SPEAKER LABELS BELOW ARE NOT RELIABLE
+```
+
+with the measurement, the reference range, and how many lines carry the doubtful
+label. The lines are kept: the recorder knows the labels are unreliable, not
+what the truth is, and deleting real speech would be the worse trade.
+
+**Not solved:** this catches a far-end track that captured *nothing like speech*.
+It cannot catch one that captured the wrong speech.
+
 ### A delivered message points at files that can disappear
 
 The brief inlines a short transcript, but the audio and manifest paths it names
@@ -120,9 +147,17 @@ sweep the reviewer reasonably assumed. The receiving session had the transcript
 because it is inlined, which is the right answer for what a project session
 actually needs, but could not re-measure the audio.
 
-**Not solved:** nothing warns that a delivered recording is about to be removed,
-`minutes rm` does not care whether a recording was delivered and referenced, and
-a recording under `/tmp` should probably not be deliverable at all.
+Delivery from a volatile directory is now refused — on **both** paths. The guard
+was on `minutes deliver` and not on automatic delivery, so every automatic
+delivery from a temporary directory went out unchecked. That cost the reviewing
+session its verification on two separate runs, including the one whose entire
+purpose was proving a fix, and it is the difference between four measured
+write-ups and one taken on trust.
+
+**Still not solved:** nothing warns that a delivered recording is about to be
+removed, and `minutes rm` does not refuse one whose files a delivered message
+names. The inlined transcript is what has been carrying the feature: the paths
+were dead on arrival every time, and the message body was not.
 
 ### ~~Loopback captures everything, and it lands in the transcript~~ — fixed by `--app`
 
