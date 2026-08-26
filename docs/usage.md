@@ -39,6 +39,22 @@ rather than assumed.
 Without installing, both binaries are in `dist/` after `make all` and can be run
 as `./dist/minutes`.
 
+### Driving it from a Claude session
+
+`skills/minutes/SKILL.md` is the skill a Claude session loads before touching
+this tool. It carries the commands, the refusals that must not be forced past,
+and how to answer a delivery brief that arrives in a session's inbox.
+
+Install it by symlink, so the copy a session reads is the one in this repo:
+
+```
+$ ln -sfn "$PWD/skills/minutes" ~/.claude/skills/minutes
+```
+
+`cmd/minutes/skill_test.go` pins it against `main.go`'s own dispatch — a command
+added here and not written there fails the build. A session already running does
+**not** see a new or edited skill; skills are read when a session starts.
+
 ### Where recordings go
 
 `~/minutes` by default, or `$MINUTES_ROOT`, or `--root` per command.

@@ -319,6 +319,10 @@ on someone else's operating system is not.
   recording obvious rather than quiet, and say in the summary that it was
   recorded. Cheap now, awkward after the first meeting somebody did not know was
   being recorded.
+- **The skill is part of the interface.** `skills/minutes/SKILL.md` is what a
+  Claude session reads before driving this tool, so a change to the commands is
+  a change to it — in the same commit. `cmd/minutes/skill_test.go` pins it
+  against `main()`'s dispatch rather than trusting that anybody remembered.
 - **Verify against a real device before believing a design.** Everything in the
   platform table above was checked on the actual machines; the parts that were
   reasoned about instead were the parts that turned out wrong.
