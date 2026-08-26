@@ -121,6 +121,22 @@ func (t Track) Started() bool {
 	return false
 }
 
+// speechFloorDBFS is the peak below which a track holds no speech, whatever
+// else it holds.
+//
+// Speech peaks between about -6 and -20 dBFS. A microphone that was muted, at
+// the wrong gain, or simply not the device in use sits far below that: measured
+// on a real recording, -55.7 dBFS, which is not silence by any digital
+// definition and is still nothing anybody said.
+//
+// The gap matters because a track above the digital-silence floor gets
+// transcribed, and a speech model given inaudible audio invents.
+const speechFloorDBFS = -40
+
+// CarriesSpeech reports whether anything on this track is loud enough to be
+// somebody talking.
+func (t Track) CarriesSpeech() bool { return t.PeakDBFS() > speechFloorDBFS }
+
 // Silent reports a track that carries no signal. This is the failure the whole
 // design exists to catch, so it is asked of every recording rather than left
 // for somebody to notice.

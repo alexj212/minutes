@@ -118,9 +118,11 @@ func (h *hosted) one(ctx context.Context, path string) ([]Utterance, error) {
 
 	var parsed struct {
 		Segments []struct {
-			Start float64 `json:"start"`
-			End   float64 `json:"end"`
-			Text  string  `json:"text"`
+			Start        float64 `json:"start"`
+			End          float64 `json:"end"`
+			Text         string  `json:"text"`
+			NoSpeechProb float64 `json:"no_speech_prob"`
+			AvgLogProb   float64 `json:"avg_logprob"`
 		} `json:"segments"`
 		Text string `json:"text"`
 	}
@@ -131,7 +133,10 @@ func (h *hosted) one(ctx context.Context, path string) ([]Utterance, error) {
 	var out []Utterance
 	for _, s := range parsed.Segments {
 		if text := strings.TrimSpace(s.Text); text != "" {
-			out = append(out, Utterance{Start: s.Start, End: s.End, Text: text})
+			out = append(out, Utterance{
+				Start: s.Start, End: s.End, Text: text,
+				NoSpeechProb: s.NoSpeechProb, AvgLogProb: s.AvgLogProb,
+			})
 		}
 	}
 	// Some compatible endpoints return only the whole text. Better one

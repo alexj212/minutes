@@ -1159,6 +1159,7 @@ func report(m *manifest.Manifest, judge bool) int {
 		return 1
 	}
 	silent := false
+	var mute []manifest.Track
 	for _, t := range m.Tracks {
 		peak := fmt.Sprintf("%.1f dBFS", t.PeakDBFS())
 		switch {
@@ -1166,6 +1167,12 @@ func report(m *manifest.Manifest, judge bool) int {
 			peak = "starting"
 		case t.Silent():
 			peak, silent = "SILENT", true
+		case !t.CarriesSpeech():
+			// Above digital silence, far below anybody talking. This is the
+			// case that used to sail through and get transcribed into
+			// invention.
+			peak += "  NO SPEECH"
+			mute = append(mute, t)
 		}
 		fmt.Printf("  %-7s %7.1fs  %2d segment(s)  peak %-11s %s\n",
 			t.Name, t.Duration(), len(t.Segments), peak, t.Device)
@@ -1183,6 +1190,14 @@ func report(m *manifest.Manifest, judge bool) int {
 			}
 			fmt.Printf("      [%02d] %-16s %6.1fs at %6.1fs%s\n",
 				s.Index, s.File, s.DurationSeconds, s.StartSeconds, note)
+		}
+	}
+	if len(mute) > 0 && judge {
+		fmt.Fprintln(os.Stderr, "")
+		for _, t := range mute {
+			fmt.Fprintf(os.Stderr, "  WARNING: the %s track peaked at %.1f dBFS, and speech peaks\n", t.Name, t.PeakDBFS())
+			fmt.Fprintf(os.Stderr, "  around -6 to -20. Nothing was captured on it. Check that %s is\n", t.Device)
+			fmt.Fprintln(os.Stderr, "  unmuted, at usable gain, and the device actually in use.")
 		}
 	}
 	if silent && judge {

@@ -37,6 +37,21 @@ const (
 // that lands in the notes as something somebody said.
 const silenceFloorDBFS = -60
 
+// noSpeechThreshold is the model's own confidence that a span held no speech,
+// above which its words are discarded.
+//
+// A speech model given silence does not return nothing. It invents a plausible
+// sentence — "Thank you.", "Department of Education." — and hands it over with
+// no hedge, and the recorder then puts those words in somebody's mouth. A
+// missing disclosure gets noticed; a fabricated quote gets believed.
+//
+// Whisper reports its own doubt and this pipeline used to throw it away.
+// Measured on the target machine: real speech reports 0.001, a microphone track
+// at -56 dBFS reported 0.908 and produced one nine-second line of invention
+// attributed to the operator. 0.6 is whisper's own default and sits in the
+// enormous gap between those two.
+const noSpeechThreshold = 0.6
+
 // Speaker labels. Your track is you; the other track is everyone else.
 const (
 	SpeakerYou    = "You"
@@ -74,6 +89,9 @@ type Transcript struct {
 	// BleedSuppressed counts microphone lines dropped as echoes of the system
 	// track. A large number means the meeting was played through speakers.
 	BleedSuppressed int `json:"bleedSuppressed,omitempty"`
+	// Invented counts spans the model itself flagged as probably not speech,
+	// whose words were discarded rather than attributed to anybody.
+	Invented int `json:"invented,omitempty"`
 	// FarEndSilent lists stretches where only the microphone carried speech.
 	FarEndSilent []Silence `json:"farEndSilent,omitempty"`
 	Lines        []Line    `json:"lines"`
@@ -172,8 +190,15 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 		AudioLeftMachine: t.SendsAudioOffMachine(),
 		Recorded:         m.Recorded,
 	}
+	var invented int
 	for i, j := range jobs {
 		for _, u := range results[i] {
+			// The model said it was probably not listening to speech. Believe
+			// it, rather than publishing what it invented anyway.
+			if u.NoSpeechProb >= noSpeechThreshold {
+				invented++
+				continue
+			}
 			out.Lines = append(out.Lines, Line{
 				// Segment-relative times become absolute here. This is the
 				// only place the two tracks are related to each other, and it
@@ -187,6 +212,13 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			})
 		}
 	}
+	if invented > 0 {
+		out.Invented = invented
+		log("discarded %d line(s) the model itself flagged as probably not speech: "+
+			"given silence it invents a plausible sentence and hands it over without a hedge, "+
+			"and those words would have been attributed to somebody", invented)
+	}
+
 	Sort(out.Lines)
 
 	kept, dropped := SuppressBleed(out.Lines)

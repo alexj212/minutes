@@ -131,9 +131,11 @@ func (w *localWhisper) Transcribe(ctx context.Context, paths []string) ([][]Utte
 		}
 		var parsed struct {
 			Segments []struct {
-				Start float64 `json:"start"`
-				End   float64 `json:"end"`
-				Text  string  `json:"text"`
+				Start        float64 `json:"start"`
+				End          float64 `json:"end"`
+				Text         string  `json:"text"`
+				NoSpeechProb float64 `json:"no_speech_prob"`
+				AvgLogProb   float64 `json:"avg_logprob"`
 			} `json:"segments"`
 		}
 		if err := json.Unmarshal(body, &parsed); err != nil {
@@ -144,7 +146,10 @@ func (w *localWhisper) Transcribe(ctx context.Context, paths []string) ([][]Utte
 			if text == "" {
 				continue
 			}
-			results[i] = append(results[i], Utterance{Start: s.Start, End: s.End, Text: text})
+			results[i] = append(results[i], Utterance{
+				Start: s.Start, End: s.End, Text: text,
+				NoSpeechProb: s.NoSpeechProb, AvgLogProb: s.AvgLogProb,
+			})
 		}
 	}
 	return results, nil

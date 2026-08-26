@@ -266,3 +266,64 @@ func TestTrimmedLeadingSilenceIsAddedBackToTimestamps(t *testing.T) {
 		t.Errorf("line placed at %.2fs, want about 5.0 — the trimmed silence was not added back", got)
 	}
 }
+
+// A speech model given silence does not return nothing. It invents a plausible
+// sentence and hands it over with no hedge, and the recorder then puts those
+// words in somebody's mouth.
+//
+// Measured on the target machine: a microphone track at -56 dBFS produced one
+// nine-second line — "Department of Education." — attributed to the operator,
+// on a recording where the microphone had captured nothing at all. Whisper
+// reported no_speech_prob 0.908 for it, and this pipeline was discarding that
+// field. Real speech reports 0.001.
+func TestModelFlaggedNonSpeechIsDiscarded(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0, Frames: 100, PeakDBFS: -55.7}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {
+			{Start: 1, End: 10, Text: "Department of Education.", NoSpeechProb: 0.908},
+			{Start: 11, End: 13, Text: "something actually said", NoSpeechProb: 0.001},
+		},
+	}}
+
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range tr.Lines {
+		if l.Text == "Department of Education." {
+			t.Error("published a line the model itself said was probably not speech")
+		}
+	}
+	if len(tr.Lines) != 1 || tr.Lines[0].Text != "something actually said" {
+		t.Fatalf("lines = %+v, want only the real one", tr.Lines)
+	}
+	if tr.Invented != 1 {
+		t.Errorf("Invented = %d, want 1 — a discarded line must be counted, not hidden", tr.Invented)
+	}
+}
+
+// Confident output must survive. Over-filtering would lose real speech, which
+// is a worse trade than an occasional invention.
+func TestConfidentSpeechIsKept(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"system": {{Index: 0, File: "system-000.wav", StartSeconds: 0, Frames: 100, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"system-000.wav": {
+			{Start: 0, End: 2, Text: "we ship on Thursday", NoSpeechProb: 0.001},
+			{Start: 2, End: 4, Text: "and Karyn owns the notes", NoSpeechProb: 0.4},
+		},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Lines) != 2 {
+		t.Fatalf("kept %d lines, want 2 — confident speech was filtered", len(tr.Lines))
+	}
+	if tr.Invented != 0 {
+		t.Errorf("Invented = %d, want 0", tr.Invented)
+	}
+}

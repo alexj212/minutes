@@ -153,10 +153,21 @@ compile and fails one level down with a message that names the wrong file.
 
 Both were found by doing it, not by planning it.
 
-**Never hand it silence.** Whisper does not return nothing for nothing; it
-invents, confidently, and the invention lands in the notes as something somebody
-said. Segments below -60 dBFS are skipped, which the manifest's per-segment peak
-makes free.
+**Never hand it silence, and believe it when it doubts itself.** Whisper does not
+return nothing for nothing; it invents, confidently, and the invention lands in
+the notes as something somebody said. Segments below -60 dBFS are skipped, which
+the manifest's per-segment peak makes free.
+
+That floor is not enough on its own. A microphone that captured nothing measured
+-55.7 dBFS — above the floor — and was transcribed as a nine-second sentence
+attributed to the operator. Whisper had reported `no_speech_prob` 0.908 for it,
+against 0.001 for real speech, and the pipeline was throwing that field away.
+Spans the model flags are now dropped, and a track peaking below -40 dBFS is
+reported as carrying no speech at all.
+
+**A missing disclosure gets noticed; a fabricated quote gets believed.** That is
+the sharper form of the trust argument this project already makes about
+disclosing that a recording happened.
 
 **Trim leading silence and add the offset back.** Given a file that opens with
 silence, whisper anchors its first utterance at zero instead of where the speech

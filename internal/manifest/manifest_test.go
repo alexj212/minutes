@@ -213,3 +213,25 @@ func TestDegradedDeliveryIsDistinguishable(t *testing.T) {
 		t.Error("a brief written to disk was recorded as a real delivery")
 	}
 }
+
+// Speech peaks around -6 to -20 dBFS. A track far below that held nothing
+// anybody said, even though it is not digital silence — which is exactly the
+// case that used to be transcribed into invention.
+func TestCarriesSpeechSeparatesAMutedMicFromDigitalSilence(t *testing.T) {
+	cases := []struct {
+		name  string
+		peak  float64
+		want  bool
+	}{
+		{"normal speech", -8, true},
+		{"quiet speech", -30, true},
+		{"a muted microphone, measured on a real recording", -55.7, false},
+		{"digital silence", -999, false},
+	}
+	for _, c := range cases {
+		tr := Track{Segments: []Segment{{PeakDBFS: c.peak}}}
+		if got := tr.CarriesSpeech(); got != c.want {
+			t.Errorf("%s (%.1f dBFS): CarriesSpeech = %v, want %v", c.name, c.peak, got, c.want)
+		}
+	}
+}

@@ -22,6 +22,14 @@ type Utterance struct {
 	Start float64 `json:"start"`
 	End   float64 `json:"end"`
 	Text  string  `json:"text"`
+	// NoSpeechProb is the model's own estimate that this span contains no
+	// speech at all. Carried through because a speech model given silence does
+	// not return nothing — it invents, and then says in this field that it was
+	// probably not listening to anything. Measured: real speech reports 0.001,
+	// a track at -56 dBFS reported 0.908 and produced "Thank you."
+	NoSpeechProb float64 `json:"noSpeechProb,omitempty"`
+	// AvgLogProb is how confident the model was in the words it chose.
+	AvgLogProb float64 `json:"avgLogProb,omitempty"`
 }
 
 // Transcriber turns audio files into utterances.
