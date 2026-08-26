@@ -86,6 +86,44 @@ above.
 path to one. And plain `deliver` now **refuses** a transcript carrying
 far-end-silent stretches, naming them, rather than sending it and hoping.
 
+### ~~A speech model given silence invents, and the invention is attributed~~ — fixed
+
+Found by the `wsl` core session reading a recording delivered to it, not by any
+test here. A microphone that captured nothing — peak −55.7 dBFS, about 52 dB
+below the other track — was transcribed as `"Department of Education."`,
+attributed to the operator, spanning nine of the recording's ten seconds. One
+long span over inaudible audio is the textbook hallucination signature.
+
+Whisper had said so. It reports `no_speech_prob` for every span and gave that
+one **0.908**; real speech on the same machine reports **0.001**. The field was
+parsed out and thrown away. Spans flagged above 0.6 — whisper's own default,
+sitting in the middle of that gap — are now dropped and counted.
+
+A track peaking below −40 dBFS is also reported as carrying no speech, because
+−55.7 is not digital silence and so sailed past the −60 floor meant to catch
+exactly this.
+
+The framing came from the reviewing session and is worth keeping: **a missing
+disclosure gets noticed, a fabricated quote gets believed.** Putting words in
+somebody's mouth is a worse trust failure than the ones this project already
+takes seriously, and it carried no uncertainty marker at all.
+
+### A delivered message points at files that can disappear
+
+The brief inlines a short transcript, but the audio and manifest paths it names
+are only paths. Nothing preserves them, and a session reading the mail later may
+find nothing there.
+
+Demonstrated the hard way: a test recording was delivered to the `wsl` session
+and deleted two minutes afterwards — by me, as test cleanup, not by the `/tmp`
+sweep the reviewer reasonably assumed. The receiving session had the transcript
+because it is inlined, which is the right answer for what a project session
+actually needs, but could not re-measure the audio.
+
+**Not solved:** nothing warns that a delivered recording is about to be removed,
+`minutes rm` does not care whether a recording was delivered and referenced, and
+a recording under `/tmp` should probably not be deliverable at all.
+
 ### Loopback captures everything, and it lands in the transcript
 
 Not new, but auto-transcription makes it visible on every meeting rather than
@@ -281,21 +319,14 @@ solution.
 
 ## What to fix next
 
-The four highest-cost items from the first real meeting are done: notes can be
-delivered without the transcript, delivery refuses a transcript that may contain
-the room, an active recording is visible outside its terminal, and short bleed
-fragments are caught by level rather than by words.
-
-What is left, in order:
-
 1. **Process-specific loopback.** The remaining way for words nobody said to
    reach a transcript: system-wide capture takes whatever else the machine is
-   playing. It is the real fix for the last of the "could cost you" items.
-2. **Say which lines were suppressed.** Two passes can now silently drop a line
-   and only a count survives. A transcript should be able to show its own
-   omissions.
-3. **A desktop indicator on Windows.** The marker file and the notification help,
-   but the meeting happens on the Windows side and nothing there says "recording".
-4. **`minutes config`.** Hand-written JSON with no validation, and now with more
-   in it than before.
-5. **R5, macOS.**
+   playing.
+2. **A delivered recording should not be able to vanish.** Warn before removing
+   one that was delivered, and refuse to deliver from a volatile directory.
+3. **Say which lines were suppressed.** Three passes can now drop a line —
+   echo, level, model doubt — and only counts survive.
+4. **A level check before recording, not after.** A muted microphone is worth
+   catching in preflight rather than in the transcript.
+5. **A desktop indicator on Windows**, where the meeting happens.
+6. **`minutes config`**, and **R5, macOS.**
