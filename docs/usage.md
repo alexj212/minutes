@@ -23,6 +23,16 @@ by looking beside itself first, so installing one without the other leaves a
 
 Override the destination with `PREFIX=/somewhere make install`.
 
+It warns if the working tree is dirty, because Go stamps the build state into
+the binary and a dirty build cannot be reproduced from any commit. What is
+actually deployed is checkable:
+
+```
+$ go version -m ~/bin/minutes | grep vcs
+	build	vcs.revision=74c0e07a7e58837ef7c751b58ce415cc10801e5e
+	build	vcs.modified=false
+```
+
 The Windows helper runs from the WSL filesystem through interop — verified,
 rather than assumed.
 

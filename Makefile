@@ -43,12 +43,22 @@ record: build helper
 # Windows loads the helper off the WSL filesystem through interop — verified,
 # because it is the kind of thing that is easy to assume and awkward to
 # discover later.
+# Installing from a dirty tree deploys a binary no commit can reproduce. Go
+# stamps the working state into the binary, so this is checkable rather than a
+# matter of discipline — and it has already happened once here.
 install: build helper
+	@if [ -n "$$(git status --porcelain 2>/dev/null)" ]; then \
+		echo "WARNING: the working tree is dirty."; \
+		echo "         The installed binary will be stamped vcs.modified=true and"; \
+		echo "         will not be reproducible from any commit. Commit first, or"; \
+		echo "         check with: go version -m $(PREFIX)/minutes"; \
+	fi
 	@mkdir -p $(PREFIX)
 	install -m 0755 $(BIN) $(PREFIX)/minutes
 	install -m 0755 $(HELPER) $(PREFIX)/minutes-capture.exe
 	@echo "installed to $(PREFIX)"
 	@command -v minutes >/dev/null 2>&1 || echo "note: $(PREFIX) is not on PATH"
+	@echo "built from $$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
 uninstall:
 	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture.exe
