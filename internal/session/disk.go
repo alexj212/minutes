@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -131,4 +132,46 @@ func HumanBytes(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f%cB", float64(n)/float64(div), "kMGT"[exp])
+}
+
+// volatileRoots are directories whose contents are not expected to survive.
+var volatileRoots = []string{"/tmp", "/var/tmp", "/dev/shm"}
+
+// IsVolatile reports whether a path lives somewhere that gets cleared.
+//
+// A delivered message names the paths of the recording it describes, and those
+// paths are read later — sometimes much later, since mail waits for a session to
+// start. Delivering from a directory that will not survive produces a message
+// pointing at nothing, which is indistinguishable from a typo.
+//
+// Learned by doing it: a recording under /tmp was delivered and then deleted,
+// and the receiving session found the paths gone.
+func IsVolatile(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	if tmp := os.Getenv("TMPDIR"); tmp != "" {
+		if within(abs, tmp) {
+			return true
+		}
+	}
+	for _, root := range volatileRoots {
+		if within(abs, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func within(path, root string) bool {
+	root, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

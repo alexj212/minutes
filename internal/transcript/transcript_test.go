@@ -327,3 +327,75 @@ func TestConfidentSpeechIsKept(t *testing.T) {
 		t.Errorf("Invented = %d, want 0", tr.Invented)
 	}
 }
+
+// Three passes can now remove a line — an echo of the far end, a quiet fragment
+// of it, and a span the model said was not speech. A count alone gives nobody a
+// way to check the judgment, and a transcript that cannot show its own
+// omissions is asking to be trusted rather than read.
+func TestWithheldLinesAreKeptWithTheirReason(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0, Frames: 100, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {
+			{Start: 1, End: 10, Text: "Department of Education.", NoSpeechProb: 0.908},
+			{Start: 11, End: 13, Text: "something actually said", NoSpeechProb: 0.001},
+		},
+	}}
+
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Lines) != 1 {
+		t.Fatalf("kept %d lines, want 1", len(tr.Lines))
+	}
+	if len(tr.Withheld) != 1 {
+		t.Fatalf("withheld %d lines, want 1 — a dropped line must remain inspectable", len(tr.Withheld))
+	}
+	w := tr.Withheld[0]
+	if w.Text != "Department of Education." {
+		t.Errorf("withheld the wrong line: %q", w.Text)
+	}
+	if w.Suppressed == "" {
+		t.Error("a withheld line does not say why it went")
+	}
+	if !strings.Contains(w.Suppressed, "not speech") {
+		t.Errorf("the reason does not explain itself: %q", w.Suppressed)
+	}
+
+	// And the readable transcript must say some exist, without printing them.
+	text := tr.Text()
+	if strings.Contains(text, "Department of Education") {
+		t.Error("a withheld line appeared in the readable transcript")
+	}
+	if !strings.Contains(text, "withheld") {
+		t.Errorf("the readable transcript does not mention that lines were withheld:\n%s", text)
+	}
+}
+
+// An echo removed from the microphone track must be inspectable too, and say
+// what it was.
+func TestSuppressedEchoesAreRecorded(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic":    {{Index: 0, File: "mic-000.wav", StartSeconds: 0, Frames: 100, PeakDBFS: -8}},
+		"system": {{Index: 0, File: "system-000.wav", StartSeconds: 0, Frames: 100, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"system-000.wav": {{Start: 4, End: 8, Text: "We agreed to ship the recorder on Thursday."}},
+		"mic-000.wav":    {{Start: 4, End: 8, Text: "we agreed to ship the recorder on thursday"}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Withheld) != 1 {
+		t.Fatalf("withheld %d, want the echo", len(tr.Withheld))
+	}
+	if !strings.Contains(tr.Withheld[0].Suppressed, "echo") {
+		t.Errorf("reason = %q, want it to name the echo", tr.Withheld[0].Suppressed)
+	}
+	if tr.Withheld[0].Track != "mic" {
+		t.Errorf("withheld the %s track; only the microphone copy should go", tr.Withheld[0].Track)
+	}
+}

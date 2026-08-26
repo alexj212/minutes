@@ -60,7 +60,15 @@ func (t Track) String() string {
 	return fmt.Sprintf("track%d", uint16(t))
 }
 
-// Frame flags, as reported by WASAPI for the packet.
+// Frame flags.
+//
+// On a TRACK_INFO frame, bit 0 means the track is scoped to one process. Its
+// device position then counts frames delivered rather than time elapsed —
+// a process loopback stream delivers nothing while its target is quiet — so
+// that counter must not be used to place audio in time.
+const FlagProcessScoped uint32 = 1 << 0
+
+// On an AUDIO frame, as reported by WASAPI for the packet.
 const (
 	FlagSilent         uint32 = 1 << 0
 	FlagDiscontinuity  uint32 = 1 << 1
@@ -97,6 +105,9 @@ type TrackInfo struct {
 	BlockAlign    uint16
 	QPCFrequency  uint64
 	Device        string
+	// ProcessScoped means this track captures one application rather than the
+	// whole machine, and its device counter cannot be trusted as a clock.
+	ProcessScoped bool
 }
 
 // BytesPerSecond is how much data one second of this track occupies.

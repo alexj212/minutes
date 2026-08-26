@@ -172,6 +172,10 @@ type Manifest struct {
 	// Transcript records that this recording has been transcribed, and how.
 	Transcript *TranscriptRecord `json:"transcript,omitempty"`
 
+	// App names the process captured instead of the whole machine, if one was
+	// targeted. Empty means system-wide, which takes everything that played.
+	App string `json:"app,omitempty"`
+
 	// IntendedFor is where this meeting's notes are meant to go, named when the
 	// recording started. Captured then because that is when somebody knows what
 	// the meeting is about; two hours later the context has drained away.

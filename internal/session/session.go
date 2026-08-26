@@ -60,6 +60,10 @@ type StartOptions struct {
 	Name    string
 	Segment time.Duration
 	Helper  string
+	// AppPID captures only that process and its children. Zero means
+	// everything the machine plays.
+	AppPID int
+	App    string
 }
 
 // Start creates a recording directory and leaves a supervisor running in it.
@@ -78,6 +82,7 @@ func Start(opt StartOptions) (*manifest.Manifest, error) {
 	}
 
 	m := manifest.New(dir, id, opt.Name, opt.Segment.Seconds())
+	m.App = opt.App
 	if err := m.Save(); err != nil {
 		return nil, err
 	}
@@ -92,7 +97,11 @@ func Start(opt StartOptions) (*manifest.Manifest, error) {
 	}
 	defer logf.Close()
 
-	cmd := exec.Command(self, "supervise", "--dir", dir, "--helper", opt.Helper)
+	args := []string{"supervise", "--dir", dir, "--helper", opt.Helper}
+	if opt.AppPID > 0 {
+		args = append(args, "--app-pid", strconv.Itoa(opt.AppPID))
+	}
+	cmd := exec.Command(self, args...)
 	cmd.Stdout = logf
 	cmd.Stderr = logf
 	// Its own session, so the recording outlives the shell that started it.

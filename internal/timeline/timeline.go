@@ -35,6 +35,10 @@ type Track struct {
 	devAnchor   uint64
 	frameAnchor uint64
 
+	// clockOnly places every packet by wall-clock, for tracks whose device
+	// counter measures delivered frames rather than elapsed time.
+	clockOnly bool
+
 	// Reanchors counts how often the two clocks disagreed enough to fall back
 	// to wall-clock. It is reported rather than hidden: a non-zero value means
 	// the stream was interrupted in a way worth knowing about.
@@ -45,6 +49,18 @@ type Track struct {
 // from a shared epoch expressed as a qpc position.
 func NewTrack(rate, epoch uint64) *Track {
 	return &Track{rate: rate, epoch: epoch}
+}
+
+// NewClockTrack creates a placer that uses wall-clock only.
+//
+// For a track scoped to one process, the device counter counts frames
+// delivered rather than time elapsed: the stream delivers nothing while its
+// target is quiet, so the counter falls behind by however long nobody spoke.
+// That is not drift to be corrected — it is the counter measuring a different
+// thing — and feeding it to the usual placer makes the guard fire continuously.
+// Measured: 98 re-anchors in ten seconds.
+func NewClockTrack(rate, epoch uint64) *Track {
+	return &Track{rate: rate, epoch: epoch, clockOnly: true}
 }
 
 // tolerance is how far the sample counter may drift from wall-clock before
@@ -70,6 +86,10 @@ func (t *Track) byClock(qpc uint64) uint64 {
 // Place returns the frame offset a packet belongs at.
 func (t *Track) Place(qpc, dev uint64) uint64 {
 	clock := t.byClock(qpc)
+
+	if t.clockOnly {
+		return clock
+	}
 
 	if !t.anchored {
 		t.anchored = true

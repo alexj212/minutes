@@ -37,7 +37,7 @@ const bleedSimilarity = 0.6
 // The count is returned rather than swallowed. Silently discarding transcript
 // lines would be a bad thing to do quietly, and a large number here means the
 // meeting was on speakers — worth knowing when reading the result.
-func SuppressBleed(lines []Line) ([]Line, int) {
+func SuppressBleed(lines []Line) (kept, dropped []Line) {
 	system := make([]Line, 0, len(lines))
 	for _, l := range lines {
 		if l.Track != "mic" {
@@ -45,14 +45,13 @@ func SuppressBleed(lines []Line) ([]Line, int) {
 		}
 	}
 	if len(system) == 0 {
-		return lines, 0
+		return lines, nil
 	}
 
 	out := make([]Line, 0, len(lines))
-	dropped := 0
 	for _, l := range lines {
 		if l.Track == "mic" && isEchoOf(l, system) {
-			dropped++
+			dropped = append(dropped, l)
 			continue
 		}
 		out = append(out, l)
@@ -134,7 +133,7 @@ const quietMarginDB = 12.0
 // fragment whose words are missing from the far-end transcript — which is how
 // "all", the tail of "...the old endpoint alive", ended up attributed to the
 // wrong person.
-func suppressQuietFragments(lines []Line, reference float64, measure func(Line) (float64, bool)) ([]Line, int) {
+func suppressQuietFragments(lines []Line, reference float64, measure func(Line) (float64, bool)) (kept, dropped []Line) {
 	system := make([]Line, 0, len(lines))
 	for _, l := range lines {
 		if l.Track != "mic" {
@@ -142,15 +141,14 @@ func suppressQuietFragments(lines []Line, reference float64, measure func(Line) 
 		}
 	}
 	if len(system) == 0 {
-		return lines, 0
+		return lines, nil
 	}
 
 	out := make([]Line, 0, len(lines))
-	dropped := 0
 	for _, l := range lines {
 		if l.Track == "mic" && len(words(l.Text)) <= maxFragmentWords && overlapsFarEnd(l, system) {
 			if db, ok := measure(l); ok && db <= reference-quietMarginDB {
-				dropped++
+				dropped = append(dropped, l)
 				continue
 			}
 		}

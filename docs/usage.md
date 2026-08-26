@@ -78,6 +78,34 @@ handled; they are aligned by timestamp, not by sample count.
 
 ## Recording
 
+### Recording one application instead of the whole machine
+
+System-wide capture takes everything that plays, so a video in another window
+becomes dialogue in the transcript, attributed to a participant and
+indistinguishable from one. To take only the meeting:
+
+```
+$ minutes apps
+  APPLICATION                PID
+♪ Zoom.exe                   28056    playing
+♪ obs64.exe                  7972     playing
+  firefox.exe                23276
+
+$ minutes start --name "vendor call" --app Zoom
+  capturing: Zoom.exe (pid 28056) only
+```
+
+`--app` matches a pid exactly or a substring of the executable name, and prefers
+a process that is actually playing over one merely holding a session open.
+
+**It refuses rather than widening.** A name that matches nothing, or matches two
+processes, is an error listing what it saw — because naming the wrong process
+records silence, and that is discovered after the meeting. Falling back to
+system-wide would be the same failure wearing a helpful face.
+
+Without `--app` the capture is system-wide, which always works and needs no
+process discovery. That remains the default.
+
 ### Where the notes will go
 
 Name it when you start, because that is when you know what the meeting is about:
@@ -495,7 +523,8 @@ retry; find the loop.
 | Command | What it does |
 |---|---|
 | `minutes preflight` | Report whether both tracks could be captured now. Non-zero if not. |
-| `minutes start [--name N] [--to PROJECT] [--segment 5m] [--force]` | Begin recording and return. `--to` defaults to this machine's own session. |
+| `minutes apps` | List processes producing audio, for `--app`. |
+| `minutes start [--name N] [--to PROJECT] [--app APP] [--segment 5m]` | Begin recording and return. `--app` captures one application only. |
 | `minutes stop [ID] [--root DIR]` | Stop and report. Defaults to the running one. |
 | `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
 | `minutes list [--root DIR]` | List recordings with size, transcript and delivery. `●` marks a live one. |

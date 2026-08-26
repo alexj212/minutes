@@ -118,13 +118,28 @@ across a passage where nothing was playing. So the gap to handle is at the start
 of a recording, not in every quiet moment of a meeting. Both cases still need
 placement by timestamp; only one of them actually occurs.
 
-Accepted cost: loopback captures *everything*, so notification sounds and music
-land on the meeting track. Process-specific loopback
-(`ActivateAudioInterfaceAsync` with `AUDIOCLIENT_ACTIVATION_PARAMS`) records only
-the meeting application and is the obvious refinement — deferred for sequencing,
-not capability. Nothing blocks it; system-wide simply always works and needs no
-process discovery, and mis-targeting a process records silence, which is a
-failure you discover after the meeting.
+System-wide loopback captures *everything*, so notification sounds, music and a
+video in another window land on the meeting track. **Process-specific loopback
+is now built**: `minutes start --app Zoom` uses `ActivateAudioInterfaceAsync`
+with `AUDIOCLIENT_ACTIVATION_PARAMS` to record one process and its children.
+Proven by playing a tone from one process while capturing another — the tone is
+20.7 dB down, which is leakage rather than capture.
+
+It is not the default, because system-wide always works and needs no process
+discovery while mis-targeting records silence, a failure you discover after the
+meeting. `--app` refuses a name matching nothing or matching two things rather
+than quietly widening, and the target is chosen from what the audio engine says
+is actually producing sound.
+
+Two things that cost time and are not in any documentation prominently enough:
+
+- **The completion handler must be agile.** Without a free-threaded marshaler the
+  activation is refused with `E_ILLEGAL_METHOD_CALL`, which reads as "you called
+  this wrong" rather than "your callback cannot be reached".
+- **A process-scoped stream's device counter measures delivered frames, not
+  elapsed time**, because it delivers nothing while the target is quiet. Placing
+  audio with it makes the timeline guard fire continuously — measured at 98
+  re-anchors in ten seconds. Such a track is placed by wall-clock alone.
 
 ### The transport is WSL–Windows interop, and it was measured
 

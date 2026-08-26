@@ -78,7 +78,10 @@ func usage() {
         Report whether a recording started now would capture both tracks.
         Exits non-zero if it would not.
 
-  minutes start [--name NAME] [--to PROJECT] [--segment 5m] [--force]
+  minutes apps
+        List processes producing audio, so one can be named with --app.
+
+  minutes start [--name NAME] [--to PROJECT] [--app APP] [--segment 5m]
         Begin recording and return. The recording outlives this command.
         --to names where the notes should go; it defaults to this machine's
         own session, and is delivered there automatically once transcribed.
@@ -148,6 +151,8 @@ func main() {
 		os.Exit(cmdRemove(args))
 	case "prune":
 		os.Exit(cmdPrune(args))
+	case "apps":
+		os.Exit(cmdApps(args))
 	case "supervise":
 		os.Exit(cmdSupervise(args))
 	case "-h", "--help", "help":
@@ -247,15 +252,21 @@ func cmdStart(args []string) int {
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "start even if another recording is running")
 	to := fs.String("to", "", "where the notes should go (default: this machine's own session)")
+	app := fs.String("app", "", "capture only this application, rather than everything the machine plays")
 	parseFlags(fs, args)
 
 	helper := readyToRecord(context.Background(), *root, *force)
 	if helper == "" {
 		return 1
 	}
+	target, ok := resolveApp(context.Background(), helper, *app)
+	if !ok {
+		return 1
+	}
 
 	m, err := session.Start(session.StartOptions{
 		Root: *root, Name: *name, Segment: *seg, Helper: helper,
+		AppPID: target.PID, App: target.Name,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "could not start recording: %v\n", err)
@@ -277,6 +288,11 @@ func cmdStart(args []string) int {
 	fmt.Printf("  segments: %s\n", seg.String())
 	if dest != "" {
 		fmt.Printf("  notes to: %s\n", dest)
+	}
+	if target.PID > 0 {
+		fmt.Printf("  capturing: %s (pid %d) only\n", target.Name, target.PID)
+	} else {
+		fmt.Printf("  capturing: everything this machine plays\n")
 	}
 	fmt.Println()
 	fmt.Printf("  stop with:  minutes stop %s\n", m.ID)
@@ -485,6 +501,62 @@ func cmdList(args []string) int {
 	return 0
 }
 
+func cmdApps(args []string) int {
+	fs := flag.NewFlagSet("apps", flag.ExitOnError)
+	parseFlags(fs, args)
+
+	helper, err := preflight.FindHelper()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	apps, err := preflight.ListApps(context.Background(), helper)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	if len(apps) == 0 {
+		fmt.Println("nothing has an audio session right now.")
+		fmt.Println("Start the meeting first — a process the audio engine does not know about")
+		fmt.Println("cannot be captured.")
+		return 0
+	}
+	fmt.Printf("  %-26s %-8s %s\n", "APPLICATION", "PID", "")
+	for _, a := range apps {
+		mark := " "
+		state := ""
+		if a.Active {
+			mark, state = "♪", "playing"
+		}
+		fmt.Printf("%s %-26s %-8d %s\n", mark, a.Name, a.PID, state)
+	}
+	fmt.Println()
+	fmt.Println("  Record only one of these with:  minutes start --app <name>")
+	fmt.Println("  Without --app the recording takes everything the machine plays,")
+	fmt.Println("  including whatever else is open.")
+	return 0
+}
+
+// resolveApp turns --app into a process id, or explains why it cannot.
+func resolveApp(ctx context.Context, helper, want string) (preflight.App, bool) {
+	if want == "" {
+		return preflight.App{}, true
+	}
+	apps, err := preflight.ListApps(ctx, helper)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return preflight.App{}, false
+	}
+	app, err := preflight.FindApp(apps, want)
+	if err != nil {
+		// Never fall back to recording everything. Silently widening the
+		// capture is how a meeting ends up with a film in it.
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return preflight.App{}, false
+	}
+	return app, true
+}
+
 func cmdPrune(args []string) int {
 	fs := flag.NewFlagSet("prune", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
@@ -606,6 +678,11 @@ func cmdRemove(args []string) int {
 			// only copy of a meeting nobody has read.
 			note = "  ← never delivered"
 			blocked++
+		} else {
+			// A message in somebody's inbox names these paths. Removing them
+			// leaves it pointing at nothing, which reads as a mistake rather
+			// than as a deliberate cleanup.
+			note = fmt.Sprintf("  ← delivered to %s; a message points at these files", st.Delivery.To)
 		}
 		fmt.Printf("  %-28s %8s%s\n", st.ID, session.HumanBytes(size), note)
 	}
@@ -645,6 +722,7 @@ func cmdRecord(args []string) int {
 	seg := fs.Duration("segment", session.DefaultSegment, "segment length")
 	force := fs.Bool("force", false, "record even if another recording is running")
 	to := fs.String("to", "", "where the notes should go (default: this machine's own session)")
+	app := fs.String("app", "", "capture only this application, rather than everything the machine plays")
 	parseFlags(fs, args)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -652,6 +730,10 @@ func cmdRecord(args []string) int {
 
 	helper := readyToRecord(ctx, *root, *force)
 	if helper == "" {
+		return 1
+	}
+	target, ok := resolveApp(ctx, helper, *app)
+	if !ok {
 		return 1
 	}
 
@@ -665,6 +747,7 @@ func cmdRecord(args []string) int {
 	if dest := destination(*to); dest != "" {
 		m.IntendedFor = dest
 	}
+	m.App = target.Name
 	if err := m.Save(); err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
@@ -681,7 +764,7 @@ func cmdRecord(args []string) int {
 	fmt.Printf("  files: %s\n\n", dir)
 
 	runErr := capture.Run(ctx, capture.Options{
-		Helper: helper, Manifest: m, Duration: *dur,
+		Helper: helper, Manifest: m, Duration: *dur, AppPID: target.PID,
 		Log: func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) },
 	})
 	if err := m.Finish(runErr); err != nil {
@@ -843,6 +926,18 @@ func cmdDeliver(args []string) int {
 		return 1
 	}
 
+	// A delivered message names these paths and is read later — sometimes much
+	// later, since mail waits for a session to start. Sending from somewhere
+	// that gets cleared produces a message pointing at nothing.
+	if session.IsVolatile(dir) {
+		fmt.Fprintf(os.Stderr, "Refusing to deliver from %s.\n\n", dir)
+		fmt.Fprintln(os.Stderr, "  That directory is temporary, and the message would name paths that")
+		fmt.Fprintln(os.Stderr, "  will not be there when somebody reads it — which looks exactly like")
+		fmt.Fprintln(os.Stderr, "  a typo. Move the recording somewhere durable, or record with")
+		fmt.Fprintln(os.Stderr, "  --root pointing at one.")
+		return 1
+	}
+
 	// Where it goes: what was asked for, then what the recording was started
 	// with, then this machine's own session. Nothing is guessed — every one of
 	// those was named by a person at some point.
@@ -973,6 +1068,7 @@ func cmdSupervise(args []string) int {
 	fs := flag.NewFlagSet("supervise", flag.ExitOnError)
 	dir := fs.String("dir", "", "recording directory")
 	helper := fs.String("helper", "", "capture helper path")
+	appPID := fs.Int("app-pid", 0, "capture only this process")
 	parseFlags(fs, args)
 	if *dir == "" || *helper == "" {
 		fmt.Fprintln(os.Stderr, "supervise needs --dir and --helper")
@@ -991,7 +1087,7 @@ func cmdSupervise(args []string) int {
 	fmt.Printf("supervising %s\n", m.ID)
 	announce(m)
 	runErr := capture.Run(ctx, capture.Options{
-		Helper: *helper, Manifest: m,
+		Helper: *helper, Manifest: m, AppPID: *appPID,
 		Log: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
 	})
 	// Capture has ended, whatever happens next. The marker must go now rather

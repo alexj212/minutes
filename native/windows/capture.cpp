@@ -15,6 +15,8 @@
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 #include <functiondiscoverykeys_devpkey.h>
+#include <audiopolicy.h>
+#include <audioclientactivationparams.h>
 #include <mmreg.h>
 
 #include <stdio.h>
@@ -48,6 +50,13 @@ enum TrackID : uint16_t {
 };
 
 enum FrameFlags : uint32_t {
+    // On a TRACK_INFO frame: this track is scoped to one process, so its device
+    // position counts frames delivered rather than time elapsed. A process
+    // loopback stream delivers nothing while its target is quiet, so the
+    // counter legitimately falls behind the wall clock and must not be used to
+    // place audio in time.
+    FLAG_PROCESS_SCOPED  = 1u << 0,
+
     FLAG_SILENT          = 1u << 0,
     FLAG_DISCONTINUITY   = 1u << 1,
     FLAG_TIMESTAMP_ERROR = 1u << 2,
@@ -101,6 +110,10 @@ static void logf(uint16_t track, const char* fmt, ...) {
 
 static std::atomic<bool> g_stop(false);
 
+// g_appPid is the process to capture instead of the whole render endpoint.
+// Zero means system-wide, which always works and needs no discovery.
+static DWORD g_appPid = 0;
+
 // The mix format may be WAVE_FORMAT_EXTENSIBLE, whose real type lives in a
 // subformat GUID. Those GUIDs are {0000000X-0000-0010-8000-00aa00389b71} where
 // X is the equivalent format tag, so Data1 is the tag — which avoids linking
@@ -136,6 +149,9 @@ struct Endpoint {
     IAudioClient*       client  = NULL;
     IAudioCaptureClient* capture = NULL;
     WAVEFORMATEX*       fmt     = NULL;
+    // event is set only for process loopback, which will not start without one.
+    // An endpoint stream is polled instead.
+    HANDLE              event   = NULL;
     std::string         name;
 
     void release() {
@@ -143,6 +159,7 @@ struct Endpoint {
         if (client)  { client->Release();  client  = NULL; }
         if (dev)     { dev->Release();     dev     = NULL; }
         if (fmt)     { CoTaskMemFree(fmt); fmt     = NULL; }
+        if (event)   { CloseHandle(event); event   = NULL; }
     }
 };
 
@@ -181,6 +198,171 @@ static HRESULT openEndpoint(bool loopback, Endpoint* ep, std::string* err) {
     hr = ep->client->GetService(__uuidof(IAudioCaptureClient), (void**)&ep->capture);
     if (FAILED(hr)) { *err = "IAudioClient::GetService(IAudioCaptureClient)"; return hr; }
 
+    return S_OK;
+}
+
+// ----------------------------------------------------- process loopback --
+
+// Defined with the audio-app enumeration below, which is where process names
+// are needed for their own sake.
+static std::string processName(DWORD pid);
+
+
+// Capturing one application rather than the whole machine.
+//
+// System-wide loopback takes everything the render endpoint plays, so a video
+// in another window becomes dialogue in the transcript, attributed to a
+// participant and indistinguishable from one. Process loopback records only the
+// target and its children.
+//
+// The cost is that a target has to be named, and naming the wrong one records
+// silence — a failure discovered after the meeting. That is why the target is
+// chosen from --list-apps, which reports what the audio engine says is actually
+// producing sound, rather than from a guess.
+//
+// Unlike an endpoint, this activation is asynchronous and has no mix format to
+// ask for: the format is declared rather than discovered.
+
+class ActivationHandler : public IActivateAudioInterfaceCompletionHandler {
+public:
+    HRESULT       result = E_FAIL;
+    IAudioClient* client = NULL;
+
+    ActivationHandler() {
+        done_ = CreateEventW(NULL, TRUE, FALSE, NULL);
+        // The audio engine calls back from its own apartment, so this object
+        // has to be marshalable into it. Without the free-threaded marshaler
+        // the activation is refused outright with E_ILLEGAL_METHOD_CALL, which
+        // reads as "you called this wrong" rather than "your callback cannot be
+        // reached" — measured, and the reason this took a while to place.
+        CoCreateFreeThreadedMarshaler(
+            static_cast<IActivateAudioInterfaceCompletionHandler*>(this), &ftm_);
+    }
+
+    bool wait(DWORD ms) { return WaitForSingleObject(done_, ms) == WAIT_OBJECT_0; }
+
+    STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IActivateAudioInterfaceCompletionHandler)) {
+            *ppv = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (riid == IID_IAgileObject) {
+            *ppv = static_cast<IActivateAudioInterfaceCompletionHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        if (riid == IID_IMarshal && ftm_) {
+            return ftm_->QueryInterface(riid, ppv);
+        }
+        *ppv = NULL;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return InterlockedIncrement(&ref_); }
+    STDMETHODIMP_(ULONG) Release() override {
+        ULONG r = InterlockedDecrement(&ref_);
+        if (r == 0) delete this;
+        return r;
+    }
+    STDMETHODIMP ActivateCompleted(IActivateAudioInterfaceAsyncOperation* op) override {
+        IUnknown* iface = NULL;
+        HRESULT hr = op->GetActivateResult(&result, &iface);
+        if (SUCCEEDED(hr) && SUCCEEDED(result) && iface) {
+            iface->QueryInterface(__uuidof(IAudioClient), (void**)&client);
+        }
+        if (iface) iface->Release();
+        SetEvent(done_);
+        return S_OK;
+    }
+
+private:
+    ~ActivationHandler() {
+        if (ftm_)  ftm_->Release();
+        if (done_) CloseHandle(done_);
+    }
+    LONG      ref_  = 1;
+    HANDLE    done_ = NULL;
+    IUnknown* ftm_  = NULL;
+};
+
+// fillFormat describes what we are asking the engine to hand us. Process
+// loopback has no mix format to query, so this is a declaration and the engine
+// converts.
+static void fillFormat(WAVEFORMATEX* f, WORD bits, WORD tag) {
+    f->wFormatTag      = tag;
+    f->nChannels       = 2;
+    f->nSamplesPerSec  = 48000;
+    f->wBitsPerSample  = bits;
+    f->nBlockAlign     = f->nChannels * f->wBitsPerSample / 8;
+    f->nAvgBytesPerSec = f->nSamplesPerSec * f->nBlockAlign;
+    f->cbSize          = 0;
+}
+
+static HRESULT openProcessLoopback(DWORD pid, Endpoint* ep, std::string* err) {
+    AUDIOCLIENT_ACTIVATION_PARAMS params = {};
+    params.ActivationType = AUDIOCLIENT_ACTIVATION_TYPE_PROCESS_LOOPBACK;
+    params.ProcessLoopbackParams.TargetProcessId = pid;
+    // The tree, not the process: a browser plays audio from a child process,
+    // and a meeting in a tab would otherwise be missed entirely.
+    params.ProcessLoopbackParams.ProcessLoopbackMode =
+        PROCESS_LOOPBACK_MODE_INCLUDE_TARGET_PROCESS_TREE;
+
+    PROPVARIANT pv = {};
+    pv.vt              = VT_BLOB;
+    pv.blob.cbSize     = sizeof(params);
+    pv.blob.pBlobData  = reinterpret_cast<BYTE*>(&params);
+
+    ActivationHandler* handler = new ActivationHandler();
+    IActivateAudioInterfaceAsyncOperation* op = NULL;
+    HRESULT hr = ActivateAudioInterfaceAsync(VIRTUAL_AUDIO_DEVICE_PROCESS_LOOPBACK,
+                                             __uuidof(IAudioClient), &pv, handler, &op);
+    if (FAILED(hr)) {
+        *err = "ActivateAudioInterfaceAsync";
+        handler->Release();
+        return hr;
+    }
+    if (!handler->wait(5000)) {
+        *err = "the audio engine did not answer the activation request";
+        if (op) op->Release();
+        handler->Release();
+        return E_FAIL;
+    }
+    if (op) op->Release();
+
+    hr = handler->result;
+    ep->client = handler->client;
+    handler->client = NULL;
+    handler->Release();
+
+    if (FAILED(hr) || !ep->client) {
+        *err = "the audio engine refused to capture that process";
+        return FAILED(hr) ? hr : E_FAIL;
+    }
+
+    // Float first, matching what the endpoints hand over, then 16-bit integer
+    // if the engine will not convert.
+    ep->fmt = (WAVEFORMATEX*)CoTaskMemAlloc(sizeof(WAVEFORMATEX));
+    if (!ep->fmt) { *err = "out of memory"; return E_OUTOFMEMORY; }
+    fillFormat(ep->fmt, 32, WAVE_FORMAT_IEEE_FLOAT);
+
+    const DWORD flags = AUDCLNT_STREAMFLAGS_LOOPBACK | AUDCLNT_STREAMFLAGS_EVENTCALLBACK;
+    hr = ep->client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2000000, 0, ep->fmt, NULL);
+    if (FAILED(hr)) {
+        fillFormat(ep->fmt, 16, WAVE_FORMAT_PCM);
+        hr = ep->client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 2000000, 0, ep->fmt, NULL);
+    }
+    if (FAILED(hr)) { *err = "IAudioClient::Initialize (process loopback)"; return hr; }
+
+    // Process loopback is event driven and will not start without a handle.
+    ep->event = CreateEventW(NULL, FALSE, FALSE, NULL);
+    if (!ep->event) { *err = "CreateEvent"; return E_FAIL; }
+    hr = ep->client->SetEventHandle(ep->event);
+    if (FAILED(hr)) { *err = "IAudioClient::SetEventHandle"; return hr; }
+
+    hr = ep->client->GetService(__uuidof(IAudioCaptureClient), (void**)&ep->capture);
+    if (FAILED(hr)) { *err = "IAudioClient::GetService(IAudioCaptureClient)"; return hr; }
+
+    ep->name = "process " + std::to_string(pid) + " (" + processName(pid) + ")";
     return S_OK;
 }
 
@@ -234,7 +416,11 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
 
     Endpoint ep;
     std::string err;
-    hr = openEndpoint(loopback, &ep, &err);
+    if (loopback && g_appPid != 0) {
+        hr = openProcessLoopback(g_appPid, &ep, &err);
+    } else {
+        hr = openEndpoint(loopback, &ep, &err);
+    }
     if (FAILED(hr)) {
         char msg[512];
         snprintf(msg, sizeof(msg), "%s failed: 0x%08lX", err.c_str(), (unsigned long)hr);
@@ -261,7 +447,8 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
         put64(&info[12], (uint64_t)qpcFreq.QuadPart);
         put32(&info[20], (uint32_t)ep.name.size());
         if (!ep.name.empty()) memcpy(&info[24], ep.name.data(), ep.name.size());
-        writeFrame(FRAME_TRACK_INFO, trackID, 0, 0, 0, info.data(), (uint32_t)info.size());
+        const uint32_t infoFlags = ep.event ? FLAG_PROCESS_SCOPED : 0;
+        writeFrame(FRAME_TRACK_INFO, trackID, 0, 0, infoFlags, info.data(), (uint32_t)info.size());
     }
 
     hr = ep.client->Start();
@@ -289,7 +476,14 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
             break;
         }
         if (packetFrames == 0) {
-            Sleep(10);
+            if (ep.event) {
+                // Process loopback is event driven and delivers nothing until
+                // the target plays something. A timeout rather than an infinite
+                // wait, so a stop request is still noticed while it is quiet.
+                WaitForSingleObject(ep.event, 200);
+            } else {
+                Sleep(10);
+            }
             continue;
         }
         while (packetFrames > 0 && !g_stop.load()) {
@@ -346,6 +540,119 @@ static void captureTrack(uint16_t trackID, bool loopback, TrackResult* result) {
     if (comInit) CoUninitialize();
 }
 
+// ------------------------------------------------------------- audio apps --
+
+// Which processes are actually playing something.
+//
+// Process-specific loopback needs a target, and the failure mode of naming the
+// wrong one is silence — discovered after the meeting, when it cannot be
+// repeated. So the target is chosen from what the audio engine reports is
+// really producing sound, rather than from a guess at a process name.
+
+static std::string processName(DWORD pid) {
+    HANDLE p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    if (!p) return "";
+    wchar_t buf[MAX_PATH];
+    DWORD n = MAX_PATH;
+    std::string out;
+    if (QueryFullProcessImageNameW(p, 0, buf, &n)) {
+        // Just the executable, not the whole path.
+        const wchar_t* slash = wcsrchr(buf, L'\\');
+        const wchar_t* name = slash ? slash + 1 : buf;
+        int len = WideCharToMultiByte(CP_UTF8, 0, name, -1, NULL, 0, NULL, NULL);
+        if (len > 1) {
+            out.resize(len - 1);
+            WideCharToMultiByte(CP_UTF8, 0, name, -1, &out[0], len, NULL, NULL);
+        }
+    }
+    CloseHandle(p);
+    return out;
+}
+
+struct AudioApp {
+    DWORD       pid;
+    std::string name;
+    bool        active;   // currently producing sound, not merely connected
+};
+
+static HRESULT enumerateAudioApps(std::vector<AudioApp>* out, std::string* err) {
+    IMMDeviceEnumerator* enumr = NULL;
+    HRESULT hr = CoCreateInstance(__uuidof(MMDeviceEnumerator), NULL, CLSCTX_ALL,
+                                  __uuidof(IMMDeviceEnumerator), (void**)&enumr);
+    if (FAILED(hr)) { *err = "CoCreateInstance(MMDeviceEnumerator)"; return hr; }
+
+    IMMDevice* dev = NULL;
+    hr = enumr->GetDefaultAudioEndpoint(eRender, eConsole, &dev);
+    enumr->Release();
+    if (FAILED(hr)) { *err = "no default render endpoint"; return hr; }
+
+    IAudioSessionManager2* mgr = NULL;
+    hr = dev->Activate(__uuidof(IAudioSessionManager2), CLSCTX_ALL, NULL, (void**)&mgr);
+    dev->Release();
+    if (FAILED(hr)) { *err = "IMMDevice::Activate(IAudioSessionManager2)"; return hr; }
+
+    IAudioSessionEnumerator* sessions = NULL;
+    hr = mgr->GetSessionEnumerator(&sessions);
+    mgr->Release();
+    if (FAILED(hr)) { *err = "GetSessionEnumerator"; return hr; }
+
+    int count = 0;
+    sessions->GetCount(&count);
+    for (int i = 0; i < count; ++i) {
+        IAudioSessionControl* ctl = NULL;
+        if (FAILED(sessions->GetSession(i, &ctl))) continue;
+
+        IAudioSessionControl2* ctl2 = NULL;
+        if (SUCCEEDED(ctl->QueryInterface(__uuidof(IAudioSessionControl2), (void**)&ctl2))) {
+            DWORD pid = 0;
+            AudioSessionState state = AudioSessionStateInactive;
+            ctl2->GetProcessId(&pid);
+            ctl->GetState(&state);
+            // The system session has no process and cannot be targeted.
+            if (pid != 0 && ctl2->IsSystemSoundsSession() != S_OK) {
+                AudioApp app;
+                app.pid = pid;
+                app.name = processName(pid);
+                app.active = (state == AudioSessionStateActive);
+                if (!app.name.empty()) out->push_back(app);
+            }
+            ctl2->Release();
+        }
+        ctl->Release();
+    }
+    sessions->Release();
+    return S_OK;
+}
+
+static int listApps() {
+    HRESULT hr = CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    bool comInit = SUCCEEDED(hr);
+
+    std::vector<AudioApp> apps;
+    std::string err;
+    HRESULT ehr = enumerateAudioApps(&apps, &err);
+
+    printf("{\n  \"apps\": [\n");
+    if (SUCCEEDED(ehr)) {
+        for (size_t i = 0; i < apps.size(); ++i) {
+            printf("    {\"pid\": %lu, \"name\": \"%s\", \"active\": %s}%s\n",
+                   (unsigned long)apps[i].pid, apps[i].name.c_str(),
+                   apps[i].active ? "true" : "false",
+                   i + 1 < apps.size() ? "," : "");
+        }
+    }
+    printf("  ],\n");
+    if (FAILED(ehr)) {
+        printf("  \"error\": \"%s\",\n  \"hresult\": \"0x%08lX\"\n", err.c_str(), (unsigned long)ehr);
+    } else {
+        printf("  \"ok\": true\n");
+    }
+    printf("}\n");
+
+    if (comInit) CoUninitialize();
+    return SUCCEEDED(ehr) ? 0 : 1;
+}
+
 // --------------------------------------------------------------- preflight --
 
 // Answers one question — would a recording started now contain both sides of
@@ -364,7 +671,9 @@ static int preflight() {
     for (int i = 0; i < 2; ++i) {
         Endpoint ep;
         std::string err;
-        HRESULT phr = openEndpoint(probes[i].loopback, &ep, &err);
+        HRESULT phr = (probes[i].loopback && g_appPid != 0)
+            ? openProcessLoopback(g_appPid, &ep, &err)
+            : openEndpoint(probes[i].loopback, &ep, &err);
         bool ok = SUCCEEDED(phr);
         if (ok) {
             // Initialising is not proof it will run; starting it is.
@@ -377,7 +686,10 @@ static int preflight() {
 
         printf("    \"%s\": {\n", probes[i].key);
         printf("      \"ok\": %s,\n", ok ? "true" : "false");
-        printf("      \"mode\": \"%s\",\n", probes[i].loopback ? "wasapi-loopback" : "wasapi-capture");
+        const char* mode = probes[i].loopback
+            ? (g_appPid ? "wasapi-process-loopback" : "wasapi-loopback")
+            : "wasapi-capture";
+        printf("      \"mode\": \"%s\",\n", mode);
         if (ok) {
             printf("      \"device\": \"%s\",\n", ep.name.c_str());
             printf("      \"sampleRate\": %lu,\n", (unsigned long)ep.fmt->nSamplesPerSec);
@@ -421,25 +733,33 @@ static void usage() {
     fprintf(stderr,
         "minutes capture helper\n"
         "  --preflight        report whether both tracks can be captured, as JSON\n"
+        "  --list-apps        list processes producing audio, as JSON\n"
         "  --duration-ms N    stop after N milliseconds (default: run until stdin closes)\n"
         "  --mic-only         capture track 0 only\n"
-        "  --system-only      capture track 1 only\n");
+        "  --system-only      capture track 1 only\n"
+        "  --app-pid N        capture only process N and its children, rather\n"
+        "                     than everything the machine plays\n");
 }
 
 int main(int argc, char** argv) {
-    bool doPreflight = false, micOnly = false, systemOnly = false;
+    bool doPreflight = false, micOnly = false, systemOnly = false, doListApps = false;
     long durationMs = 0;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--preflight")        doPreflight = true;
+        else if (a == "--list-apps")   doListApps = true;
         else if (a == "--mic-only")    micOnly = true;
         else if (a == "--system-only") systemOnly = true;
         else if (a == "--duration-ms" && i + 1 < argc) durationMs = atol(argv[++i]);
+        else if (a == "--app-pid" && i + 1 < argc)    g_appPid = (DWORD)atol(argv[++i]);
         else if (a == "--help" || a == "-h") { usage(); return 0; }
         else { fprintf(stderr, "unknown argument: %s\n", a.c_str()); usage(); return 2; }
     }
 
+    if (doListApps) {
+        return listApps();
+    }
     if (doPreflight) {
         // Text on stdout in this mode, so leave it in text mode.
         return preflight();

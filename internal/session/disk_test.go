@@ -141,3 +141,41 @@ func TestHumanBytes(t *testing.T) {
 		}
 	}
 }
+
+// A delivered message names the paths of the recording it describes, and is
+// read later — sometimes much later, since mail waits for a session to start.
+// Delivering from somewhere that gets cleared produces a message pointing at
+// nothing, which is indistinguishable from a typo.
+//
+// Learned by doing it: a recording under /tmp was delivered and then deleted.
+func TestVolatileDirectoriesAreRecognised(t *testing.T) {
+	cases := map[string]bool{
+		"/tmp/route/2026-08-25-000000":        true,
+		"/tmp":                                true,
+		"/var/tmp/thing":                      true,
+		"/dev/shm/thing":                      true,
+		"/home/alexj/minutes/2026-08-25":      false,
+		"/c/projects/minutes/recordings/x":    false,
+		"/home/alexj/tmp/not-really-volatile": false,
+	}
+	for dir, want := range cases {
+		if got := IsVolatile(dir); got != want {
+			t.Errorf("IsVolatile(%q) = %v, want %v", dir, got, want)
+		}
+	}
+}
+
+// A directory merely named like a temporary one is not one. "/tmpfoo" is not
+// inside "/tmp".
+func TestSimilarlyNamedDirectoriesAreNotVolatile(t *testing.T) {
+	if IsVolatile("/tmpfoo/recordings") {
+		t.Error("/tmpfoo was treated as being inside /tmp")
+	}
+}
+
+func TestTMPDIRIsHonoured(t *testing.T) {
+	t.Setenv("TMPDIR", "/scratch/mytmp")
+	if !IsVolatile("/scratch/mytmp/recording") {
+		t.Error("a directory under $TMPDIR was not recognised as volatile")
+	}
+}

@@ -17,8 +17,8 @@ func TestEchoOfTheSystemTrackIsDroppedFromTheMic(t *testing.T) {
 		mic(4.1, 8.2, "we agreed to ship the recorder on thursday"),
 	}
 	kept, dropped := SuppressBleed(lines)
-	if dropped != 1 {
-		t.Fatalf("dropped %d lines, want 1", dropped)
+	if len(dropped) != 1 {
+		t.Fatalf("dropped %d lines, want 1", len(dropped))
 	}
 	if len(kept) != 1 || kept[0].Track != "system" {
 		t.Fatalf("kept %+v, want only the system line", kept)
@@ -33,8 +33,8 @@ func TestDistinctMicSpeechIsKept(t *testing.T) {
 		mic(4.1, 8.2, "Actually I think Friday is more realistic given the migration."),
 	}
 	kept, dropped := SuppressBleed(lines)
-	if dropped != 0 {
-		t.Fatalf("dropped %d lines of genuine speech", dropped)
+	if len(dropped) != 0 {
+		t.Fatalf("dropped %d lines of genuine speech", len(dropped))
 	}
 	if len(kept) != 2 {
 		t.Fatalf("kept %d lines, want 2", len(kept))
@@ -49,8 +49,8 @@ func TestSameWordsFarApartInTimeAreKept(t *testing.T) {
 		mic(600.0, 602.0, "ship it on Thursday"),
 	}
 	kept, dropped := SuppressBleed(lines)
-	if dropped != 0 {
-		t.Fatalf("dropped %d lines said ten minutes apart", dropped)
+	if len(dropped) != 0 {
+		t.Fatalf("dropped %d lines said ten minutes apart", len(dropped))
 	}
 	if len(kept) != 2 {
 		t.Fatalf("kept %d lines, want 2", len(kept))
@@ -65,8 +65,8 @@ func TestFragmentOfALongerSystemLineIsAnEcho(t *testing.T) {
 		mic(8.0, 9.5, "write the migration notes"),
 	}
 	_, dropped := SuppressBleed(lines)
-	if dropped != 1 {
-		t.Errorf("dropped %d lines, want 1 — a fragment of a system line is an echo", dropped)
+	if len(dropped) != 1 {
+		t.Errorf("dropped %d lines, want 1 — a fragment of a system line is an echo", len(dropped))
 	}
 }
 
@@ -75,8 +75,8 @@ func TestFragmentOfALongerSystemLineIsAnEcho(t *testing.T) {
 func TestMicOnlyRecordingIsUntouched(t *testing.T) {
 	lines := []Line{mic(0, 1, "one"), mic(1, 2, "two")}
 	kept, dropped := SuppressBleed(lines)
-	if dropped != 0 || len(kept) != 2 {
-		t.Errorf("dropped %d of a mic-only recording", dropped)
+	if len(dropped) != 0 || len(kept) != 2 {
+		t.Errorf("dropped %d of a mic-only recording", len(dropped))
 	}
 }
 
@@ -142,8 +142,8 @@ func TestQuietFragmentDuringFarEndSpeechIsDropped(t *testing.T) {
 	measure := func(l Line) (float64, bool) { return -30.0, true } // the fragment is faint
 
 	kept, dropped := suppressQuietFragments(lines, reference, measure)
-	if dropped != 1 {
-		t.Fatalf("dropped %d, want 1 — the fragment was attributed to the wrong person", dropped)
+	if len(dropped) != 1 {
+		t.Fatalf("dropped %d, want 1 — the fragment was attributed to the wrong person", len(dropped))
 	}
 	if len(kept) != 1 || kept[0].Track != "system" {
 		t.Fatalf("kept %+v, want only the far-end line", kept)
@@ -160,7 +160,7 @@ func TestShortButLoudInterjectionIsKept(t *testing.T) {
 	}
 	measure := func(l Line) (float64, bool) { return -7.0, true } // right at speaking level
 	_, dropped := suppressQuietFragments(lines, -6.0, measure)
-	if dropped != 0 {
+	if len(dropped) != 0 {
 		t.Error("dropped an interjection spoken at full volume")
 	}
 }
@@ -174,7 +174,7 @@ func TestQuietButLongLineIsKept(t *testing.T) {
 	}
 	measure := func(l Line) (float64, bool) { return -30.0, true }
 	_, dropped := suppressQuietFragments(lines, -6.0, measure)
-	if dropped != 0 {
+	if len(dropped) != 0 {
 		t.Error("dropped a full sentence for being quiet; that is somebody speaking softly")
 	}
 }
@@ -188,7 +188,7 @@ func TestQuietFragmentWithNoFarEndSpeechIsKept(t *testing.T) {
 	}
 	measure := func(l Line) (float64, bool) { return -40.0, true }
 	_, dropped := suppressQuietFragments(lines, -6.0, measure)
-	if dropped != 0 {
+	if len(dropped) != 0 {
 		t.Error("dropped a fragment with no far-end speech anywhere near it")
 	}
 }
@@ -202,7 +202,7 @@ func TestUnmeasurableFragmentIsKept(t *testing.T) {
 	}
 	measure := func(l Line) (float64, bool) { return 0, false }
 	_, dropped := suppressQuietFragments(lines, -6.0, measure)
-	if dropped != 0 {
+	if len(dropped) != 0 {
 		t.Error("dropped a line whose level could not be measured")
 	}
 }
@@ -211,7 +211,7 @@ func TestMicOnlyRecordingSkipsTheLevelPass(t *testing.T) {
 	lines := []Line{mic(0, 1, "one"), mic(2, 3, "two")}
 	measure := func(l Line) (float64, bool) { return -99.0, true }
 	kept, dropped := suppressQuietFragments(lines, -6.0, measure)
-	if dropped != 0 || len(kept) != 2 {
+	if len(dropped) != 0 || len(kept) != 2 {
 		t.Error("dropped lines from a recording with no far end at all")
 	}
 }

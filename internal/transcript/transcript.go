@@ -67,6 +67,9 @@ type Line struct {
 	Track   string  `json:"track"`
 	Speaker string  `json:"speaker"`
 	Text    string  `json:"text"`
+	// Suppressed names why a line was withheld from the readable transcript.
+	// Empty on everything that survived.
+	Suppressed string `json:"suppressed,omitempty"`
 	// FarEndSilent marks a line spoken while the other side had been silent
 	// long enough that the call may not have been running. What the microphone
 	// picked up then may be the room rather than the meeting.
@@ -92,6 +95,14 @@ type Transcript struct {
 	// Invented counts spans the model itself flagged as probably not speech,
 	// whose words were discarded rather than attributed to anybody.
 	Invented int `json:"invented,omitempty"`
+	// Withheld holds every line that was dropped, and why.
+	//
+	// Three passes can now remove a line — an echo of the far end, a quiet
+	// fragment of it, and a span the model said was not speech — and a count
+	// alone gives nobody a way to check the judgment. These are kept out of the
+	// readable transcript and written down here, because a transcript that
+	// cannot show its own omissions is asking to be trusted rather than read.
+	Withheld []Line `json:"withheld,omitempty"`
 	// FarEndSilent lists stretches where only the microphone carried speech.
 	FarEndSilent []Silence `json:"farEndSilent,omitempty"`
 	Lines        []Line    `json:"lines"`
@@ -193,13 +204,7 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 	var invented int
 	for i, j := range jobs {
 		for _, u := range results[i] {
-			// The model said it was probably not listening to speech. Believe
-			// it, rather than publishing what it invented anyway.
-			if u.NoSpeechProb >= noSpeechThreshold {
-				invented++
-				continue
-			}
-			out.Lines = append(out.Lines, Line{
+			line := Line{
 				// Segment-relative times become absolute here. This is the
 				// only place the two tracks are related to each other, and it
 				// is arithmetic because the segments were cut on a shared
@@ -209,7 +214,17 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 				Track:   j.track,
 				Speaker: speakerFor(j.track),
 				Text:    u.Text,
-			})
+			}
+			// The model said it was probably not listening to speech. Believe
+			// it, rather than publishing what it invented anyway — but write
+			// down what it said and why it went.
+			if u.NoSpeechProb >= noSpeechThreshold {
+				invented++
+				line.Suppressed = fmt.Sprintf("the model reported %.3f confidence that this was not speech", u.NoSpeechProb)
+				out.Withheld = append(out.Withheld, line)
+				continue
+			}
+			out.Lines = append(out.Lines, line)
 		}
 	}
 	if invented > 0 {
@@ -220,9 +235,15 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 	}
 
 	Sort(out.Lines)
+	Sort(out.Withheld)
 
-	kept, dropped := SuppressBleed(out.Lines)
+	kept, echoes := SuppressBleed(out.Lines)
 	out.Lines = kept
+	dropped := len(echoes)
+	for _, l := range echoes {
+		l.Suppressed = "an echo of the far end, arriving through the air"
+		out.Withheld = append(out.Withheld, l)
+	}
 
 	// Second pass, by level rather than by words. A fragment of the far end
 	// whose words never made it into the far-end transcript cannot be matched
@@ -230,11 +251,15 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 	if micTrack, ok := trackNamed(m, "mic"); ok {
 		lr := newLevelReader(m.Dir(), m.SegmentSeconds, micTrack)
 		if ref, ok := referenceLevel(out.Lines, lr); ok {
-			quiet, n := suppressQuietFragments(out.Lines, ref,
+			quiet, faint := suppressQuietFragments(out.Lines, ref,
 				func(l Line) (float64, bool) { return lr.peakDBFS(l.Start, l.End) })
-			if n > 0 {
+			if n := len(faint); n > 0 {
 				out.Lines = quiet
 				dropped += n
+				for _, l := range faint {
+					l.Suppressed = fmt.Sprintf("a fragment %.0f dB or more below your speaking level while the far end was talking", quietMarginDB)
+					out.Withheld = append(out.Withheld, l)
+				}
 				log("dropped %d quiet microphone fragment(s): %.0f dB or more below your speaking "+
 					"level while the other side was talking, which is the far end arriving through the air", n, quietMarginDB)
 			}
@@ -313,6 +338,11 @@ func (t *Transcript) Text() string {
 	fmt.Fprintf(&b, "# Transcribed by %s; audio %s this machine.\n\n",
 		t.Backend, map[bool]string{true: "was sent off", false: "stayed on"}[t.AudioLeftMachine])
 
+	if len(t.Withheld) > 0 {
+		fmt.Fprintf(&b, "# %d line(s) were withheld — echoes of the far end, or spans the model\n"+
+			"# said were not speech. They are in %s with the reason for each.\n\n",
+			len(t.Withheld), JSONName)
+	}
 	if len(t.FarEndSilent) > 0 {
 		fmt.Fprintf(&b, "# %d stretch(es) below are marked: the other side was silent, so what\n"+
 			"# the microphone picked up there may be the room rather than the meeting.\n\n", len(t.FarEndSilent))

@@ -43,7 +43,7 @@ cl.exe /nologo /EHsc /O2 /W3 /MT /std:c++17 ^
   "%SRC%" ^
   /Fe:"%OUTDIR%\minutes-capture.exe" ^
   /Fo:"%OUTDIR%\\" ^
-  /link ole32.lib
+  /link ole32.lib mmdevapi.lib
 if errorlevel 1 (echo ERROR: compile failed & exit /b 1)
 
 del "%OUTDIR%\capture.obj" 2>nul

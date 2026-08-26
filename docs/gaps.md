@@ -124,7 +124,7 @@ actually needs, but could not re-measure the audio.
 `minutes rm` does not care whether a recording was delivered and referenced, and
 a recording under `/tmp` should probably not be deliverable at all.
 
-### Loopback captures everything, and it lands in the transcript
+### ~~Loopback captures everything, and it lands in the transcript~~ — fixed by `--app`
 
 Not new, but auto-transcription makes it visible on every meeting rather than
 only when you ask. System-wide loopback takes whatever the machine is playing,
@@ -135,8 +135,16 @@ Observed: a nine-second test recording produced four lines, two of which came
 from unrelated audio playing at the time. There is nothing in the transcript to
 say which is which.
 
-Process-specific loopback (section 3) is the real fix. Until then, the
-transcript of a meeting is the transcript of the machine.
+`minutes start --app Zoom` now captures one process and its children instead of
+the render endpoint, so nothing else the machine plays reaches the recording.
+Proven by playing a 440 Hz tone from one process while capturing another: the
+tone sits 20.7 dB below the target's speech, which is spectral leakage rather
+than capture.
+
+**Still the default is system-wide**, because it always works and needs no
+process discovery, and because naming the wrong process records silence. `--app`
+refuses a name that matches nothing or matches two things, rather than quietly
+widening.
 
 ### ~~An active recording is only obvious where it was started~~ — fixed
 
@@ -248,11 +256,13 @@ These are known scope, not oversights.
 - **Native Linux.** The PulseAudio path (a source, plus the sink's `.monitor`)
   is described but not implemented. `preflight` refuses there rather than
   pretending.
-- **Process-specific loopback.** System-wide capture takes everything, so
-  notification sounds and music land on the meeting track. `ActivateAudioInterfaceAsync`
-  with `AUDIOCLIENT_ACTIVATION_PARAMS` would record only the meeting
-  application. Deferred for sequencing: system-wide always works and needs no
-  process discovery, and mis-targeting a process records silence.
+- ~~**Process-specific loopback.**~~ **Built.** `--app` captures one process and
+  its children. Two things learned doing it: the completion handler must be
+  agile or the activation is refused with `E_ILLEGAL_METHOD_CALL`, which reads
+  as "you called this wrong" rather than "your callback cannot be reached"; and
+  a process-scoped stream's device counter measures delivered frames rather
+  than elapsed time, so it must be placed by wall-clock alone — feeding it to
+  the usual placer produced 98 re-anchors in ten seconds.
 - **Summarising in the worker.** Deliberately moved to the driving session. See
   [usage.md](usage.md#delivering).
 
@@ -326,14 +336,18 @@ solution.
 
 ## What to fix next
 
-1. **Process-specific loopback.** The remaining way for words nobody said to
-   reach a transcript: system-wide capture takes whatever else the machine is
-   playing.
-2. **A delivered recording should not be able to vanish.** Warn before removing
-   one that was delivered, and refuse to deliver from a volatile directory.
-3. **Say which lines were suppressed.** Three passes can now drop a line —
-   echo, level, model doubt — and only counts survive.
-4. **A level check before recording, not after.** A muted microphone is worth
+The three highest items are done: one application can be captured instead of the
+whole machine, a delivered recording cannot be sent from a directory that will
+not survive, and every suppressed line is kept with the reason it went.
+
+What is left:
+
+1. **A desktop indicator on Windows**, where the meeting actually happens. The
+   marker file and the notification help; neither is on screen.
+2. **A level check before recording, not after.** A muted microphone is worth
    catching in preflight rather than in the transcript.
-5. **A desktop indicator on Windows**, where the meeting happens.
-6. **`minutes config`**, and **R5, macOS.**
+3. **`minutes config`.** Hand-written JSON, no validation, and now with rather
+   more in it.
+4. **Background room audio during a meeting.** `--app` removes what the machine
+   plays; it cannot remove what the room says while the far end is talking.
+5. **R5, macOS.**

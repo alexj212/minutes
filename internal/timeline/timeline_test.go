@@ -125,3 +125,37 @@ func TestBackwardsCounterFallsBackToTheClock(t *testing.T) {
 		t.Errorf("Reanchors = %d, want 1", tr.Reanchors)
 	}
 }
+
+// A track scoped to one process counts frames delivered, not time elapsed: the
+// stream delivers nothing while its target is quiet. Feeding that counter to
+// the usual placer makes the guard fire continuously — measured at 98
+// re-anchors in ten seconds — so such a track is placed by wall-clock alone.
+func TestProcessScopedTrackIgnoresTheDeviceCounter(t *testing.T) {
+	const rate = 48000
+	tr := NewClockTrack(rate, 0)
+
+	// The counter stalls completely while the application is silent, then
+	// resumes; wall-clock keeps going throughout.
+	tr.Place(0, 0)
+	got := tr.Place(uint64(10*u), 4800) // 10s later, counter advanced 0.1s
+
+	if want := uint64(10 * rate); got != want {
+		t.Errorf("placed at frame %d, want %d — the delivered-frame counter was trusted", got, want)
+	}
+	if tr.Reanchors != 0 {
+		t.Errorf("Reanchors = %d, want 0 — a stalled counter is expected here, not an anomaly", tr.Reanchors)
+	}
+}
+
+// And an ordinary endpoint track still uses the counter, which is what keeps
+// wall-clock jitter from accumulating.
+func TestEndpointTrackStillUsesTheDeviceCounter(t *testing.T) {
+	const rate = 48000
+	tr := NewTrack(rate, 0)
+	tr.Place(0, 0)
+	// Wall-clock says 1.0s but is jittery; the counter says exactly 1.0s.
+	got := tr.Place(uint64(u+u/1000), rate)
+	if got != rate {
+		t.Errorf("placed at frame %d, want %d — the counter should win over jitter", got, rate)
+	}
+}

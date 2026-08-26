@@ -30,6 +30,9 @@ type Options struct {
 	Manifest *manifest.Manifest
 	// Duration bounds the recording. Zero records until ctx is cancelled.
 	Duration time.Duration
+	// AppPID captures only that process and its children rather than
+	// everything the machine plays. Zero means system-wide.
+	AppPID int
 	Log      func(string, ...any)
 }
 
@@ -49,6 +52,9 @@ func Run(ctx context.Context, opt Options) error {
 	args := []string{}
 	if opt.Duration > 0 {
 		args = append(args, "--duration-ms", fmt.Sprintf("%d", opt.Duration.Milliseconds()))
+	}
+	if opt.AppPID > 0 {
+		args = append(args, "--app-pid", fmt.Sprintf("%d", opt.AppPID))
 	}
 	cmd := exec.Command(opt.Helper, args...)
 
@@ -128,6 +134,7 @@ loop:
 				runErr = err
 				break loop
 			}
+			info.ProcessScoped = f.Flags&frame.FlagProcessScoped != 0
 			name := f.Track.String()
 			sw, err := segment.NewWriter(m.Dir(), name,
 				int(info.SampleRate), int(info.Channels), m.SegmentSeconds)
@@ -167,7 +174,11 @@ loop:
 				break loop
 			}
 			if ts.place == nil {
-				ts.place = timeline.NewTrack(uint64(ts.info.SampleRate), epoch)
+				if ts.info.ProcessScoped {
+					ts.place = timeline.NewClockTrack(uint64(ts.info.SampleRate), epoch)
+				} else {
+					ts.place = timeline.NewTrack(uint64(ts.info.SampleRate), epoch)
+				}
 			}
 			offset := ts.place.Place(f.QPC100ns, f.DevicePos)
 			if err := ts.writer.WriteAt(offset, samples, f.Flags); err != nil {
