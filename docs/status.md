@@ -1,6 +1,6 @@
 # Where this stands
 
-Last updated 2026-08-25, after R4.
+Last updated 2026-08-25, after R4 and the first real meeting.
 
 The plan is in [CLAUDE.md](../CLAUDE.md); this is what became of it. It exists
 so that the difference between *built*, *proven*, and *assumed* stays visible,
@@ -150,13 +150,29 @@ every deliberate test combined:
 The last one is the one that matters, and it is the reason far-end silence is
 now marked in both the readable transcript and the JSON.
 
+## Built in response to that meeting
+
+Everything the first real call exposed is closed:
+
+| Found | Now |
+|---|---|
+| `record` never transcribed | Both paths share one continuation |
+| A running transcription was invisible | State and pid while it works, progress every 30s |
+| Transcription documented at ~1x | Measured at **7.4x**; corrected everywhere |
+| The transcript could not be delivered without its private content | `deliver --notes`, and plain `deliver` refuses a flagged transcript |
+| Thirteen minutes of a family in a work transcript | Far-end-silent stretches marked in both formats |
+| A one-word echo attributed to you | Second suppression pass, by level rather than words |
+| Only `minutes list` knew it was recording | Marker file plus notifications on start and stop |
+| Nothing ever deleted anything | `minutes prune` with a policy, off unless configured |
+
 ## What is next
 
 [gaps.md](gaps.md) has the full list with reasoning. In order:
 
-1. **Short bleed fragments misattributed to you** — the design's own worst
-   failure in miniature, needing a signal other than word overlap.
-2. **An active recording is only visible where it was started** — thin, for a
-   tool whose own documentation calls recording a legal matter.
-3. **Automatic retention** — `minutes rm --older-than` exists; nothing runs it.
+1. **Process-specific loopback** — the last way for words nobody said to reach a
+   transcript, since system-wide capture takes whatever else is playing.
+2. **Say which lines were suppressed**, rather than only how many. Two passes can
+   now drop a line and leave only a count behind.
+3. **A desktop indicator on Windows**, where the meeting actually happens. The
+   marker file and the notification help; neither is on screen.
 4. **R5, macOS.**

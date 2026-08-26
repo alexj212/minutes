@@ -190,10 +190,28 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 	Sort(out.Lines)
 
 	kept, dropped := SuppressBleed(out.Lines)
+	out.Lines = kept
+
+	// Second pass, by level rather than by words. A fragment of the far end
+	// whose words never made it into the far-end transcript cannot be matched
+	// textually, but it is still quieter than speech into the microphone.
+	if micTrack, ok := trackNamed(m, "mic"); ok {
+		lr := newLevelReader(m.Dir(), m.SegmentSeconds, micTrack)
+		if ref, ok := referenceLevel(out.Lines, lr); ok {
+			quiet, n := suppressQuietFragments(out.Lines, ref,
+				func(l Line) (float64, bool) { return lr.peakDBFS(l.Start, l.End) })
+			if n > 0 {
+				out.Lines = quiet
+				dropped += n
+				log("dropped %d quiet microphone fragment(s): %.0f dB or more below your speaking "+
+					"level while the other side was talking, which is the far end arriving through the air", n, quietMarginDB)
+			}
+		}
+	}
+
 	if dropped > 0 {
-		out.Lines = kept
 		out.BleedSuppressed = dropped
-		log("dropped %d microphone line(s) that were echoes of the system track: "+
+		log("suppressed %d microphone line(s) as echoes of the system track: "+
 			"this meeting was on speakers rather than headphones, so the microphone "+
 			"also heard the far end", dropped)
 	}
@@ -205,6 +223,16 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			clock(g.Start), roughMinutes(g.Duration()), g.Lines)
 	}
 	return out, nil
+}
+
+// trackNamed finds a track's format in the manifest.
+func trackNamed(m *manifest.Manifest, name string) (manifest.Track, bool) {
+	for _, t := range m.Tracks {
+		if t.Name == name {
+			return t, true
+		}
+	}
+	return manifest.Track{}, false
 }
 
 // Sort orders lines by when they were said. Ties break by track so the result

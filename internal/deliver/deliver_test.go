@@ -260,3 +260,54 @@ func TestBriefPathsAreAbsolute(t *testing.T) {
 		}
 	}
 }
+
+// The whole point of Notes: nothing about the transcript travels with them.
+// Not the text, and not a path to a file on the same machine as the reader.
+//
+// This exists because of a meeting whose transcript held thirteen minutes of
+// private household conversation, and every way this package could send it
+// carried the transcript along.
+func TestNotesCarryNoTranscriptAndNoPath(t *testing.T) {
+	b := fixture(t)
+	n := Notes{Recording: b.Recording, Text: "## Decisions\n- ship on Thursday"}
+	body := n.Body()
+
+	if strings.Contains(body, "my line") || strings.Contains(body, "their line") {
+		t.Error("notes carried transcript content")
+	}
+	if strings.Contains(body, b.Recording.Dir()) {
+		t.Error("notes carried the recording directory, so the reader can open the transcript")
+	}
+	for _, leak := range []string{"transcript.txt", "transcript.json", "manifest.json", ".wav"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("notes mention %q", leak)
+		}
+	}
+	if !strings.Contains(body, "ship on Thursday") {
+		t.Error("the notes themselves are missing")
+	}
+}
+
+// A recording is a trust matter, so notes have to say they came from one even
+// when the transcript does not travel with them.
+func TestNotesSayTheMeetingWasRecorded(t *testing.T) {
+	b := fixture(t)
+	n := Notes{Recording: b.Recording, Text: "something"}
+	body := n.Body()
+	if !strings.Contains(body, "recorded") {
+		t.Errorf("notes do not say the meeting was recorded:\n%s", body)
+	}
+	if !strings.Contains(n.Title(), "standup") {
+		t.Errorf("title does not name the meeting: %q", n.Title())
+	}
+}
+
+// Brief and Notes must be distinguishable in an inbox listing: one is asking
+// for work, the other is delivering it.
+func TestNotesAndBriefTitlesDiffer(t *testing.T) {
+	b := fixture(t)
+	n := Notes{Recording: b.Recording, Text: "x"}
+	if n.Title() == b.Title() {
+		t.Errorf("both titled %q; a session cannot tell a request from a delivery", n.Title())
+	}
+}

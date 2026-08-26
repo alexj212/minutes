@@ -32,10 +32,12 @@ system track at 44.1 kHz, both stereo 16-bit. A two-hour meeting is 2.7 GB.
 `start` and `record` now estimate headroom from the rates preflight reports,
 refuse below fifteen minutes of room, and warn below two hours.
 
-**Still missing:** automatic retention. `minutes rm` will now delete by id or
-`--older-than`, and refuses to remove anything whose notes were never delivered,
-but nothing runs it for you. At 1.33 GB/hour that still adds up faster than it
-looks.
+`minutes prune` applies a policy from the config — `keepDays`, `keepCount`,
+`keepUndelivered` — and `minutes rm` removes things by hand.
+
+**Off unless configured, deliberately.** Deleting somebody's meetings without
+being asked is worse than using their disk. **And nothing runs it for you**: a
+cron line does that if you want one.
 
 ### ~~Two recordings can run at once, silently~~ — fixed
 
@@ -44,7 +46,7 @@ it is and its pid, and `--force` overrides. Two supervisors would otherwise
 capture the same meeting twice at twice the CPU and disk, and make a bare
 `minutes stop` ambiguous.
 
-### The recorder keeps running when the call does not
+### ~~The recorder keeps running when the call does not~~ — flagged, and delivery now refuses
 
 Marked now, but not solved. When the far end drops — a reboot, a dropped call,
 somebody stepping away — the recorder carries on and everything the microphone
@@ -72,7 +74,7 @@ across 118 minutes.
 
 The honest position: **read a transcript before sending it anywhere.**
 
-### `deliver` can only send the transcript, not a summary
+### ~~`deliver` can only send the transcript~~ — fixed
 
 `minutes deliver` sends the brief with the transcript inlined or its path
 attached. For a meeting containing anything private that is exactly wrong, and
@@ -80,7 +82,9 @@ the only way to hand over notes without the raw material is to write them by
 hand and send them out of band — which is what had to be done for the meeting
 above.
 
-**Fix:** a mode that delivers only a summary, with no transcript and no path.
+`minutes deliver --notes FILE` sends notes and nothing else — no transcript, no
+path to one. And plain `deliver` now **refuses** a transcript carrying
+far-end-silent stretches, naming them, rather than sending it and hoping.
 
 ### Loopback captures everything, and it lands in the transcript
 
@@ -96,7 +100,7 @@ say which is which.
 Process-specific loopback (section 3) is the real fix. Until then, the
 transcript of a meeting is the transcript of the machine.
 
-### An active recording is only obvious where it was started
+### ~~An active recording is only obvious where it was started~~ — fixed
 
 `start` prints a banner, but then returns. After that, the only way to know this
 machine is recording is to run `minutes list`. There is no tray icon, no
@@ -107,7 +111,13 @@ places a legal one, "you can check if you think to check" is thin. It is worse
 for the detached path than the foreground one, and the detached path is the one
 meant for real meetings.
 
-**Fix:** at minimum, a notification on start as well as on delivery.
+A marker file at `~/.config/minutes/recording` holds the current recording for
+anything to read — a shell prompt, a status bar, a person with `cat` — and a
+notification goes out on start and stop. A marker whose process has died is
+ignored and removed, so the machine never claims to record forever.
+
+**Still thin:** there is no desktop indicator on Windows, where the meeting
+actually happens.
 
 ---
 
@@ -142,7 +152,7 @@ at roughly **real time**, and both tracks are transcribed, so a 30-minute
 meeting occupies the GPU for about 30–45 minutes afterwards. Nothing queues
 this — stopping two meetings close together will have them competing.
 
-### Short bleed fragments evade suppression and are misattributed to you
+### ~~Short bleed fragments evade suppression~~ — a second pass now catches them by level
 
 Found by the recording that finally proved attribution. The last line of it was:
 
@@ -185,7 +195,9 @@ Neither is configurable, and the dropped lines are not recoverable from the
 transcript.
 
 **Fix:** make both thresholds configurable, and record dropped lines in
-`transcript.json` rather than only counting them.
+`transcript.json` rather than only counting them. The level pass makes this
+worse in one way — there are now two ways for a line to disappear, and neither
+leaves a trace beyond a count.
 
 ---
 
@@ -254,18 +266,21 @@ proven — see below — and what it exposed is listed as a gap of its own.*
 
 ## What to fix next
 
-The three highest-cost items are done: mid-stream device failure is now recorded
-as a failure with its reason, concurrent starts are refused, and the disk is
-checked before recording.
+The four highest-cost items from the first real meeting are done: notes can be
+delivered without the transcript, delivery refuses a transcript that may contain
+the room, an active recording is visible outside its terminal, and short bleed
+fragments are caught by level rather than by words.
 
 What is left, in order:
 
-1. **Deliver a summary without the transcript.** The first real meeting could
-   not be delivered by the tool at all, because everything it sends carries the
-   raw transcript with it.
-2. **Short bleed fragments misattributed to you.** Rare, but it is the design's
-   own worst failure in miniature. Needs a signal other than word overlap —
-   level, or system-track energy — rather than a blunter text rule that would
-   delete real interjections.
-3. **Make an active recording visible outside the terminal that started it.**
-4. **Automatic retention.** `minutes rm --older-than` exists; nothing runs it.
+1. **Process-specific loopback.** The remaining way for words nobody said to
+   reach a transcript: system-wide capture takes whatever else the machine is
+   playing. It is the real fix for the last of the "could cost you" items.
+2. **Say which lines were suppressed.** Two passes can now silently drop a line
+   and only a count survives. A transcript should be able to show its own
+   omissions.
+3. **A desktop indicator on Windows.** The marker file and the notification help,
+   but the meeting happens on the Windows side and nothing there says "recording".
+4. **`minutes config`.** Hand-written JSON with no validation, and now with more
+   in it than before.
+5. **R5, macOS.**

@@ -96,6 +96,9 @@ func usage() {
         Remove recordings. Refuses to remove ones whose notes were never
         delivered unless told otherwise.
 
+  minutes prune [--dry-run] [--force] [--root DIR]
+        Apply the retention policy from the config. Off unless configured.
+
   minutes record [--duration D] [--name NAME] [--segment 5m] [--root DIR]
         Record in the foreground until the duration elapses or Ctrl-C.
 
@@ -104,10 +107,12 @@ func usage() {
         Runs locally by default; audio leaves this machine only if a hosted
         backend is named.
 
-  minutes deliver [ID] --to PROJECT [--root DIR] [--no-notify]
-        Hand the transcript to a session so it can write and file the notes,
-        and tell the human. Falls back to writing the brief to disk when the
-        agent is unreachable.
+  minutes deliver [ID] --to PROJECT [--notes FILE] [--include-flagged]
+        Hand a meeting to a session. By default it sends the transcript so the
+        session can write the notes; --notes sends notes you have already
+        written and nothing else. Refuses to send a transcript containing
+        stretches where the far end was silent, since those may be the room
+        rather than the meeting.
 
 Environment:
   MINUTES_ROOT     where recordings are kept (default: ~/minutes)
@@ -140,6 +145,8 @@ func main() {
 		os.Exit(cmdDeliver(args))
 	case "rm":
 		os.Exit(cmdRemove(args))
+	case "prune":
+		os.Exit(cmdPrune(args))
 	case "supervise":
 		os.Exit(cmdSupervise(args))
 	case "-h", "--help", "help":
@@ -264,6 +271,48 @@ func cmdStart(args []string) int {
 	return 0
 }
 
+// announce says out loud that a recording has started, beyond the terminal that
+// started it: a marker file anything can read, and a notification if the agent
+// is there. Both are best effort — neither is a reason not to record.
+func announce(m *manifest.Manifest) {
+	if err := session.SetMarker(session.Marker{
+		ID: m.ID, Name: m.Name, Dir: m.Dir(), PID: os.Getpid(), StartedAt: m.StartedAt,
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "  (could not write the recording marker: %v)\n", err)
+	}
+	what := m.Name
+	if what == "" {
+		what = m.ID
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = deliver.New().Notify(ctx, "Recording started", "minutes is recording: "+what, "minutes")
+}
+
+// unannounce clears the marker and says the recording has ended.
+func unannounce(m *manifest.Manifest) {
+	if err := session.ClearMarker(); err != nil {
+		fmt.Fprintf(os.Stderr, "  (could not clear the recording marker: %v)\n", err)
+	}
+	what := m.Name
+	if what == "" {
+		what = m.ID
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = deliver.New().Notify(ctx, "Recording stopped",
+		fmt.Sprintf("minutes stopped recording %s (%s)", what, duration(m.Duration())), "minutes")
+}
+
+// duration renders a length for a person.
+func duration(seconds float64) string {
+	d := time.Duration(seconds * float64(time.Second))
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
 func banner() {
 	fmt.Println("┌──────────────────────────────────────────────┐")
 	fmt.Println("│  ● RECORDING — microphone and system audio   │")
@@ -290,14 +339,22 @@ func cmdStop(args []string) int {
 	rc := report(m, true)
 	if m.State == manifest.StateTranscribing {
 		fmt.Printf("\n  transcribing in the background — `minutes list` shows when it is done.\n")
-		fmt.Printf("  at roughly real time, expect about %s.\n", roughly(m.Duration()*2))
+		fmt.Printf("  expect about %s.\n", roughly(transcribeSeconds(m.Duration())))
 	}
 	return rc
 }
 
-// roughly renders how long transcription will take. Whisper on this machine
-// runs at about real time, and both tracks are transcribed, so a meeting costs
-// roughly twice its own length.
+// transcribeSeconds estimates how long transcribing a recording will take.
+//
+// Both tracks are transcribed, so a meeting is twice its own length in audio,
+// and whisper runs at about 7.4x real time — measured on a two-hour call, not
+// on a short clip where loading the model dominates and makes it look like 1x.
+func transcribeSeconds(recordingSeconds float64) float64 {
+	const throughput = 7.4
+	return recordingSeconds * 2 / throughput
+}
+
+// roughly renders a duration for a person waiting on it.
 func roughly(seconds float64) string {
 	switch {
 	case seconds < 90:
@@ -416,6 +473,74 @@ func cmdList(args []string) int {
 	return 0
 }
 
+func cmdPrune(args []string) int {
+	fs := flag.NewFlagSet("prune", flag.ExitOnError)
+	root := fs.String("root", defaultRoot(), "where recordings are kept")
+	force := fs.Bool("force", false, "do not ask")
+	dryRun := fs.Bool("dry-run", false, "say what would go, and remove nothing")
+	parseFlags(fs, args)
+
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	if !cfg.Retention.Enabled() {
+		fmt.Println("No retention policy is configured, so nothing is removed automatically.")
+		fmt.Printf("Set one in %s, for example:\n\n", config.Path())
+		fmt.Println(`  "retention": { "keepDays": 90, "keepUndelivered": true }`)
+		fmt.Println("\nDeleting recordings without being asked is worse than using disk,")
+		fmt.Println("which is why this is off until you say otherwise.")
+		fmt.Println("\n`minutes rm` removes things by hand in the meantime.")
+		return 0
+	}
+
+	all, err := session.List(*root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	doomed, spared := cfg.Retention.Doomed(all, time.Now())
+
+	for _, c := range spared {
+		fmt.Printf("  keeping %-28s %8s  — %s\n", c.ID, session.HumanBytes(c.Size), c.Reason)
+	}
+	if len(doomed) == 0 {
+		fmt.Println("nothing to remove")
+		return 0
+	}
+
+	var total int64
+	fmt.Println("Would remove:")
+	for _, c := range doomed {
+		total += c.Size
+		fmt.Printf("  %-28s %8s  — %s\n", c.ID, session.HumanBytes(c.Size), c.Reason)
+	}
+	fmt.Printf("  %s total\n", session.HumanBytes(total))
+
+	if *dryRun {
+		return 0
+	}
+	if !*force {
+		fmt.Print("\nRemove these? [y/N] ")
+		var answer string
+		fmt.Scanln(&answer)
+		if answer != "y" && answer != "Y" {
+			fmt.Println("nothing removed")
+			return 0
+		}
+	}
+	for _, c := range doomed {
+		if err := os.RemoveAll(c.Dir()); err != nil {
+			fmt.Fprintf(os.Stderr, "removing %s: %v\n", c.ID, err)
+			return 1
+		}
+		fmt.Printf("  removed %s\n", c.ID)
+	}
+	fmt.Printf("  %s freed\n", session.HumanBytes(total))
+	return 0
+}
+
 func cmdRemove(args []string) int {
 	fs := flag.NewFlagSet("rm", flag.ExitOnError)
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
@@ -530,6 +655,8 @@ func cmdRecord(args []string) int {
 	}
 
 	banner()
+	announce(m)
+	defer unannounce(m)
 	if *dur > 0 {
 		fmt.Printf("  for %s, or Ctrl-C to stop early\n", *dur)
 	} else {
@@ -559,8 +686,8 @@ func cmdRecord(args []string) int {
 	if cfg, err := config.Load(); err != nil {
 		fmt.Fprintf(os.Stderr, "  config unreadable, not transcribing: %v\n", err)
 	} else if cfg.Transcription.AfterStop {
-		fmt.Printf("\n  transcribing — roughly %s. Ctrl-C to leave it for `minutes transcribe` later.\n\n",
-			roughly(m.Duration()*2))
+		fmt.Printf("\n  transcribing — about %s. Ctrl-C to leave it for `minutes transcribe` later.\n\n",
+			roughly(transcribeSeconds(m.Duration())))
 		if err := transcribeInto(ctx, m, cfg, func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }); err != nil {
 			fmt.Fprintf(os.Stderr, "  transcription failed (the recording is intact): %v\n", err)
 		} else if t, lerr := transcript.Load(m.Dir()); lerr == nil {
@@ -679,6 +806,9 @@ func cmdDeliver(args []string) int {
 	root := fs.String("root", defaultRoot(), "where recordings are kept")
 	to := fs.String("to", "", "the project whose session should write the notes")
 	from := fs.String("from", "minutes", "who the message is from")
+	notesFile := fs.String("notes", "", "send these notes instead of the transcript")
+	includeFlagged := fs.Bool("include-flagged", false,
+		"send the transcript even though stretches of it may be the room rather than the meeting")
 	noNotify := fs.Bool("no-notify", false, "do not send a human notification")
 	ids := parseFlags(fs, args)
 
@@ -698,35 +828,74 @@ func cmdDeliver(args []string) int {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
 		return 1
 	}
-	t, err := transcript.Load(dir)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "no transcript in %s: run `minutes transcribe` first (%v)\n", dir, err)
-		return 1
+
+	var title, body, notifyBody string
+
+	if *notesFile != "" {
+		// Notes somebody has already written. Nothing about the transcript
+		// goes with them — not the text, not a path to it.
+		raw, err := os.ReadFile(*notesFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "reading notes: %v\n", err)
+			return 1
+		}
+		if len(strings.TrimSpace(string(raw))) == 0 {
+			fmt.Fprintf(os.Stderr, "%s is empty; there is nothing to deliver\n", *notesFile)
+			return 1
+		}
+		n := deliver.Notes{Recording: m, Text: string(raw)}
+		title, body, notifyBody = n.Title(), n.Body(), n.NotifyBody()
+	} else {
+		t, err := transcript.Load(dir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "no transcript in %s: run `minutes transcribe` first, or pass --notes (%v)\n", dir, err)
+			return 1
+		}
+		// A transcript with flagged stretches is one where the call had dropped
+		// and the room had not. Sending it whole is exactly what should not
+		// happen by default: on the meeting that prompted this, those stretches
+		// held thirteen minutes of somebody's family.
+		if len(t.FarEndSilent) > 0 && !*includeFlagged {
+			var flagged float64
+			for _, g := range t.FarEndSilent {
+				flagged += g.Duration()
+			}
+			fmt.Fprintf(os.Stderr, "Refusing to send this transcript whole.\n\n")
+			fmt.Fprintf(os.Stderr, "  %d stretch(es), %.0f minutes in total, are marked: the other side was\n",
+				len(t.FarEndSilent), flagged/60)
+			fmt.Fprintf(os.Stderr, "  silent, so what the microphone recorded there may be the room rather\n")
+			fmt.Fprintf(os.Stderr, "  than the meeting.\n\n")
+			for _, g := range t.FarEndSilent {
+				fmt.Fprintf(os.Stderr, "    %s - %s   %.0f min\n",
+					clockOf(g.Start), clockOf(g.End), g.Duration()/60)
+			}
+			fmt.Fprintf(os.Stderr, "\n  Read %s, then either\n", filepath.Join(dir, transcript.TextName))
+			fmt.Fprintf(os.Stderr, "  write it up and send that with --notes, or pass --include-flagged\n")
+			fmt.Fprintf(os.Stderr, "  if the whole transcript is genuinely fine to hand over.\n")
+			return 1
+		}
+		b := deliver.Brief{Recording: m, Transcript: t}
+		title, body, notifyBody = b.Title(), b.Body(), b.NotifyBody()
 	}
 
-	brief := deliver.Brief{Recording: m, Transcript: t}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	client := deliver.New()
 	err = client.Send(ctx, deliver.Message{
-		To: *to, From: *from, Tag: "minutes",
-		Title: brief.Title(), Body: brief.Body(),
+		To: *to, From: *from, Tag: "minutes", Title: title, Body: body,
 	})
 
 	if errors.Is(err, deliver.ErrUnreachable) {
-		// Degrade rather than fail. A recorder that loses a meeting because a
+		// Degrade rather than fail. A recorder that lost a meeting because a
 		// coordinator blipped would be worse than one that never integrated at
 		// all; the notes are on disk either way.
 		path := filepath.Join(dir, "delivery.md")
-		body := "# " + brief.Title() + "\n\n" + brief.Body()
-		if werr := os.WriteFile(path, []byte(body), 0o644); werr != nil {
+		if werr := os.WriteFile(path, []byte("# "+title+"\n\n"+body), 0o644); werr != nil {
 			fmt.Fprintf(os.Stderr, "agent unreachable, and writing the brief failed too: %v\n", werr)
 			return 1
 		}
-		if serr := m.SetDelivery(manifest.DeliveryRecord{
-			To: *to, At: time.Now(), Degraded: true,
-		}); serr != nil {
+		if serr := m.SetDelivery(manifest.DeliveryRecord{To: *to, At: time.Now(), Degraded: true}); serr != nil {
 			fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 		}
 		fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
@@ -746,15 +915,25 @@ func cmdDeliver(args []string) int {
 	if serr := m.SetDelivery(manifest.DeliveryRecord{To: *to, At: time.Now()}); serr != nil {
 		fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 	}
-	fmt.Printf("  notes requested from %s\n", *to)
+	if *notesFile != "" {
+		fmt.Printf("  notes delivered to %s (no transcript sent)\n", *to)
+	} else {
+		fmt.Printf("  notes requested from %s\n", *to)
+	}
 
 	if !*noNotify {
-		if err := client.Notify(ctx, "Meeting recorded", brief.NotifyBody(), "minutes"); err != nil {
+		if err := client.Notify(ctx, "Meeting recorded", notifyBody, "minutes"); err != nil {
 			// The message is what matters; the notification is a courtesy.
 			fmt.Printf("  (the human notification did not go out: %v)\n", err)
 		}
 	}
 	return 0
+}
+
+// clockOf renders seconds as h:mm:ss for a person reading a refusal.
+func clockOf(seconds float64) string {
+	t := int(seconds)
+	return fmt.Sprintf("%d:%02d:%02d", t/3600, (t/60)%60, t%60)
 }
 
 // cmdSupervise is the detached half of `start`. It is not in the usage text
@@ -779,10 +958,16 @@ func cmdSupervise(args []string) int {
 	defer stop()
 
 	fmt.Printf("supervising %s\n", m.ID)
+	announce(m)
 	runErr := capture.Run(ctx, capture.Options{
 		Helper: *helper, Manifest: m,
 		Log: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
 	})
+	// Capture has ended, whatever happens next. The marker must go now rather
+	// than after transcription, or the machine keeps claiming to be recording
+	// for the length of the transcript.
+	unannounce(m)
+
 	if runErr != nil {
 		if err := m.Finish(runErr); err != nil {
 			fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)

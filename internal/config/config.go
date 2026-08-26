@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/alexj/minutes/internal/session"
 	"github.com/alexj/minutes/internal/transcribe"
 )
 
@@ -41,7 +42,8 @@ type Transcription struct {
 
 // Config is the whole of it.
 type Config struct {
-	Transcription Transcription `json:"transcription"`
+	Transcription Transcription     `json:"transcription"`
+	Retention     session.Retention `json:"retention"`
 }
 
 // Path is where the config lives.
@@ -58,13 +60,19 @@ func Path() string {
 
 // Default is what runs when nobody has said otherwise: everything stays here.
 func Default() *Config {
-	return &Config{Transcription: Transcription{
-		Backend:   transcribe.BackendLocalWhisper,
-		Model:     "small",
-		Language:  "en",
-		Device:    "cuda",
-		AfterStop: true,
-	}}
+	return &Config{
+		Transcription: Transcription{
+			Backend:   transcribe.BackendLocalWhisper,
+			Model:     "small",
+			Language:  "en",
+			Device:    "cuda",
+			AfterStop: true,
+		},
+		// Off. Deleting somebody's meetings without being asked is worse than
+		// using their disk, so retention is opt-in — but when it is turned on,
+		// an undelivered recording is protected unless that is turned off too.
+		Retention: session.Retention{KeepUndelivered: true},
+	}
 }
 
 // Load reads the config, falling back to defaults when there is none.

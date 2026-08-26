@@ -150,12 +150,49 @@ that meeting's audio was sent off this machine. `DELIVERED` names the project
 its notes went to, or says `(on disk only)` if the agent was unreachable and the
 brief was written locally instead.
 
-Removing them:
+### Knowing it is recording without asking
+
+While a recording runs, `~/.config/minutes/recording` holds what it is:
+
+```json
+{ "id": "2026-08-25-104604-standup", "name": "standup",
+  "dir": "/home/alexj/minutes/2026-08-25-104604-standup", "pid": 3869780 }
+```
+
+It is removed when capture ends — not when transcription ends — and a marker
+whose process has died is ignored and cleaned up, so the machine never claims to
+be recording forever.
+
+For a shell prompt:
+
+```sh
+[ -f ~/.config/minutes/recording ] && echo "● REC"
+```
+
+A notification also goes out on start and stop, through shabadoo's agent socket
+if it is reachable. Both are best effort: neither is a reason not to record.
+
+This exists because `minutes list` only tells you if you think to ask, and the
+times that matter are the times you do not.
+
+### Removing them:
 
 ```
 $ minutes rm 2026-08-25-093012-vendor
 $ minutes rm --older-than 720h            # everything over 30 days
 ```
+
+There is also a policy, applied by `minutes prune`:
+
+```json
+{ "retention": { "keepDays": 90, "keepUndelivered": true } }
+```
+
+`keepDays` removes anything older, `keepCount` keeps only the newest N, and
+`keepUndelivered` protects recordings whose notes never went anywhere. **It is
+off unless configured**, because deleting somebody's meetings without being
+asked is worse than using their disk. `minutes prune --dry-run` says what would
+go. Nothing runs it for you; a cron line does that if you want one.
 
 `rm` refuses to delete a recording whose notes were never delivered, because
 that loses the only copy of a meeting nobody has read — pass `--undelivered`
@@ -240,6 +277,9 @@ Configure at `~/.config/minutes/config.json` (override the path with
 | `language` | Skips language detection. Leave empty to detect. |
 | `device` | `cuda` or `cpu`, local only. |
 | `afterStop` | Transcribe automatically in the background when a recording stops. Default `true`. |
+
+Retention lives beside it under `retention`: `keepDays`, `keepCount`,
+`keepUndelivered`. All off by default.
 | `baseUrl` | Points a hosted backend at anything OpenAI-compatible. |
 | `apiKeyEnv` | *Name of* the environment variable holding the key — never the key itself, because a config file gets copied, committed and pasted into bug reports. |
 
@@ -276,6 +316,18 @@ $ minutes deliver --to homelab
 The transcript goes to that project's session inbox with a brief asking for
 decisions, action items with owners, and open questions. The human gets a
 notification.
+
+**It refuses if the transcript has stretches where the far end was silent**,
+because those may be the room rather than the meeting — on a real call that was
+thirteen minutes of somebody's family. Read it, then either write it up:
+
+```
+$ minutes deliver --to homelab --notes notes.md
+  notes delivered to homelab (no transcript sent)
+```
+
+which sends your notes and nothing else — no transcript, no path to one — or
+pass `--include-flagged` if the whole thing is genuinely fine to hand over.
 
 **`--to` is required.** Which project a meeting's notes belong to is a judgment
 call, and this program does not make it — nor does it write the notes. It
@@ -397,13 +449,15 @@ retry; find the loop.
 | `minutes status [ID] [--root DIR]` | Show a recording's state and segments. |
 | `minutes list [--root DIR]` | List recordings with size, transcript and delivery. `●` marks a live one. |
 | `minutes rm [ID...] [--older-than D] [--undelivered] [--force]` | Remove recordings. Refuses undelivered ones by default. |
+| `minutes prune [--dry-run] [--force]` | Apply the retention policy. Off unless configured. |
 | `minutes record [--duration D] [--name N] [--segment 5m]` | Record in the foreground. |
 | `minutes transcribe [ID] [--backend B] [--model M]` | Transcribe and merge both tracks. |
-| `minutes deliver [ID] --to PROJECT [--no-notify]` | Hand it to a session; tell the human. |
+| `minutes deliver [ID] --to PROJECT [--notes FILE] [--include-flagged]` | Hand it to a session; tell the human. |
 
 | Environment | Effect |
 |---|---|
 | `MINUTES_ROOT` | Where recordings are kept. Default `~/minutes`. |
+| `MINUTES_MARKER` | The recording marker file. Default `~/.config/minutes/recording`. |
 | `MINUTES_HELPER` | Path to the Windows capture helper. Default: beside the `minutes` binary. |
 | `MINUTES_CONFIG` | Path to the config file. |
 | `MINUTES_WHISPER` | Path to the whisper binary. |

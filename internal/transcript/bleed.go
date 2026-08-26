@@ -111,3 +111,60 @@ func containment(a, b []string) float64 {
 	}
 	return float64(shared) / float64(smaller)
 }
+
+// maxFragmentWords bounds what counts as a fragment.
+//
+// Only very short lines are eligible for the level test. A full sentence at a
+// low level is somebody speaking quietly, which belongs in the transcript; a
+// stray word or two at a low level, while the other side is talking, is the
+// far end arriving through the air.
+const maxFragmentWords = 3
+
+// quietMarginDB is how far below your normal speaking level a fragment must be
+// before it is treated as an echo.
+//
+// Twelve decibels is roughly a quarter of the amplitude. Speaking softly does
+// not get you there; a room away does.
+const quietMarginDB = 12.0
+
+// suppressQuietFragments removes short microphone lines that are much quieter
+// than the operator's own speech and land while the far end is talking.
+//
+// This is the second pass. The first compares words, and cannot catch a
+// fragment whose words are missing from the far-end transcript — which is how
+// "all", the tail of "...the old endpoint alive", ended up attributed to the
+// wrong person.
+func suppressQuietFragments(lines []Line, reference float64, measure func(Line) (float64, bool)) ([]Line, int) {
+	system := make([]Line, 0, len(lines))
+	for _, l := range lines {
+		if l.Track != "mic" {
+			system = append(system, l)
+		}
+	}
+	if len(system) == 0 {
+		return lines, 0
+	}
+
+	out := make([]Line, 0, len(lines))
+	dropped := 0
+	for _, l := range lines {
+		if l.Track == "mic" && len(words(l.Text)) <= maxFragmentWords && overlapsFarEnd(l, system) {
+			if db, ok := measure(l); ok && db <= reference-quietMarginDB {
+				dropped++
+				continue
+			}
+		}
+		out = append(out, l)
+	}
+	return out, dropped
+}
+
+// overlapsFarEnd reports whether the far end was talking at the same moment.
+func overlapsFarEnd(l Line, system []Line) bool {
+	for _, s := range system {
+		if s.End >= l.Start-bleedOverlap && s.Start <= l.End+bleedOverlap {
+			return true
+		}
+	}
+	return false
+}

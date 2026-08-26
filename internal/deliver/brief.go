@@ -19,6 +19,54 @@ import (
 // path is always given, and the reader is on the same machine.
 const inlineLimit = 24 << 10
 
+// Notes is a summary somebody has already written, sent instead of the
+// transcript.
+//
+// This exists because of a meeting that could not be delivered at all. The
+// transcript contained thirteen minutes of private household conversation
+// captured while the other party rebooted, and everything this package could
+// send carried the transcript with it — inlined, or as a path to a file on the
+// same machine as the reader. The only way to hand the notes over was to write
+// them by hand and send them out of band, which is a gap in the tool rather
+// than a workflow.
+type Notes struct {
+	Recording *manifest.Manifest
+	Text      string
+}
+
+// Title is the one line an inbox listing shows.
+func (n Notes) Title() string {
+	what := n.Recording.Name
+	if what == "" {
+		what = n.Recording.ID
+	}
+	return fmt.Sprintf("Meeting notes: %s", what)
+}
+
+// Body is the notes, with just enough provenance to be trusted, and
+// deliberately no transcript and no path to one.
+func (n Notes) Body() string {
+	m := n.Recording
+	var s strings.Builder
+	fmt.Fprintf(&s, "Notes from a meeting on %s, lasting %s.\n",
+		m.StartedAt.Format("2006-01-02 15:04 MST"), duration(m.Duration()))
+	s.WriteString("**The meeting was recorded and transcribed.**\n\n")
+	s.WriteString("These are notes only. The transcript is not included and its location is " +
+		"not given: a recording is of the room and not only of the meeting, and what is " +
+		"safe to summarise is not always safe to hand over whole.\n\n---\n\n")
+	s.WriteString(n.Text)
+	return s.String()
+}
+
+// NotifyBody is the short form a human sees.
+func (n Notes) NotifyBody() string {
+	what := n.Recording.Name
+	if what == "" {
+		what = n.Recording.ID
+	}
+	return fmt.Sprintf("%s — %s. Notes delivered.", what, duration(n.Recording.Duration()))
+}
+
 // Brief is what a session is given to work from.
 //
 // The worker does not summarise. What matters in a meeting, and which project
