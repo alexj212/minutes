@@ -146,7 +146,7 @@ has been transcribed. One bound for any other project is stored and waits, and
 ```
 $ minutes stop
 ...
-not delivering automatically: "xinthesys" is not this machine's own session, and
+not delivering automatically: "homelab" is not this machine's own session, and
 sending a meeting to another project is publishing rather than filing.
 Use `minutes deliver`.
 ```
