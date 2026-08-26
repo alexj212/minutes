@@ -286,19 +286,26 @@ believing a design.
 
 *Microphone-side attribution was the entry here for three attempts. It is now
 proven — see below — and what it exposed is listed as a gap of its own.*
-- **A long meeting.** The longest run is 32 seconds. Segment rotation, timeline
-  drift and manifest growth over 90 minutes are untested. The drift arithmetic
-  is sound and the sample counter measured 0.1 ms against wall-clock over 13
-  seconds, but that is not the same as an hour.
+- ~~**A long meeting.**~~ **Proven.** A real 117-minute call: 23 and 24 segments
+  rotating cleanly, both tracks finishing 0.4 s apart, 2.5 GB on disk against a
+  predicted 1.33 GB/hour. Ctrl-C stopped it cleanly and the far end dropped out
+  repeatedly while the other party rebooted, with the timeline placing
+  everything correctly around the gaps.
 - ~~**An idle gap mid-recording.**~~ **Observed in the wild.** A real standup
   recorded on 2026-08-25 produced 10.7 seconds of gap-fill on the system track
   and fired the re-anchor guard twice — the render endpoint went idle mid-meeting
   and the device counter and wall clock diverged past the tolerance. The guard
   did what it was built for, and the two tracks still finished 14 ms apart over
   73 seconds. It had never fired against real hardware before this.
-- **Transcription on real meeting audio.** Proven against a synthetic voice with
-  known ground truth. Crosstalk, accents, and people talking over each other are
-  untested.
+- ~~**Transcription on real meeting audio.**~~ **Done, with a caveat.** A real
+  two-hour call transcribed to 1309 usable lines. What it also showed: 757
+  microphone lines were echoes and had to be suppressed, whisper repeats itself
+  on unclear audio, and it invents outright on silence. Quality on crosstalk and
+  accents is *adequate*, not good — it is a record of what was said, not a
+  reliable quote source.
+
+- **Anything but this machine.** One Windows host through WSL, one microphone,
+  one output device, one GPU. Every measurement in this project comes from it.
 
 ---
 
