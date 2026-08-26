@@ -564,3 +564,31 @@ func writeSpeechLike(t *testing.T, path string, rate, channels int, secs float64
 		t.Fatal(err)
 	}
 }
+
+// A withheld span must carry the model's raw judgement, not only a sentence
+// with the number formatted into it.
+//
+// A reviewer found a block reporting exactly "0.600" — the threshold, to three
+// decimals, on two spans at once — and asked whether it was measured or
+// synthesized. The formatted string could not answer that. Real values look
+// like 0.0006066110800020397, so the raw number is the evidence.
+func TestWithheldSpanCarriesTheRawProbability(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0,
+			DurationSeconds: 10, Frames: 480000, PeakDBFS: -8}},
+	})
+	const raw = 0.9083104133605957
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 1, End: 9, Text: "Department of Education.", NoSpeechProb: raw}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Withheld) != 1 {
+		t.Fatalf("withheld %d, want 1", len(tr.Withheld))
+	}
+	if got := tr.Withheld[0].NoSpeechProb; got != raw {
+		t.Errorf("recorded %v, want the model's own %v — precision was lost", got, raw)
+	}
+}

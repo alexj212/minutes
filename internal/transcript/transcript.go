@@ -70,6 +70,17 @@ type Line struct {
 	// Suppressed names why a line was withheld from the readable transcript.
 	// Empty on everything that survived.
 	Suppressed string `json:"suppressed,omitempty"`
+	// NoSpeechProb is the model's raw judgement, at full precision, on a line
+	// withheld for that reason.
+	//
+	// Recorded as a number rather than only formatted into the sentence above.
+	// A reviewer found a withheld block reporting exactly "0.600" — the
+	// threshold, to three decimals, on two spans at once with whole-second
+	// bounds — and asked whether it had been measured or synthesized. The
+	// formatted string could not answer that, and neither could I: real values
+	// look like 0.0006066110800020397. Whatever produced it, the next
+	// occurrence will carry the number it was actually given.
+	NoSpeechProb float64 `json:"noSpeechProb,omitempty"`
 	// FarEndSilent marks a line spoken while the other side had been silent
 	// long enough that the call may not have been running. What the microphone
 	// picked up then may be the room rather than the meeting.
@@ -252,6 +263,7 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			// down what it said and why it went.
 			if u.NoSpeechProb >= noSpeechThreshold {
 				doubted++
+				line.NoSpeechProb = u.NoSpeechProb
 				line.Suppressed = fmt.Sprintf("the model put %.3f probability on this span containing no speech", u.NoSpeechProb)
 				out.Withheld = append(out.Withheld, line)
 				continue
