@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -26,10 +27,7 @@ type fakeAgent struct {
 
 func startFakeAgent(t *testing.T, status int, body string) *fakeAgent {
 	t.Helper()
-	// A short path: unix sockets have a ~100 byte limit and t.TempDir() names
-	// are long enough to blow it on some systems.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "a.sock")
+	path := shortSocketPath(t)
 
 	a := &fakeAgent{status: status, body: body, calls: map[string]map[string]any{}}
 	mux := http.NewServeMux()
@@ -56,6 +54,34 @@ func startFakeAgent(t *testing.T, status int, body string) *fakeAgent {
 	})
 	t.Setenv("SHABADOO_SOCKET", path)
 	return a
+}
+
+// shortSocketPath returns a socket path guaranteed to fit in sun_path.
+//
+// macOS caps a unix socket path at 104 bytes and Linux at 108, and t.TempDir()
+// on macOS is already ~80 before the test name is added — so whether a test
+// binds or fails with "bind: invalid argument" depends on how long its function
+// name is. TestSendRefusesWithoutADestination produced exactly 104 and failed;
+// a shorter neighbour passed. That is the worst shape of bug, since it looks
+// random and reappears whenever somebody adds a test with a long name.
+//
+// Found by minutes-mac running this suite on a Mac. It never failed here and
+// never would have.
+func shortSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "min")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	path := filepath.Join(dir, "a.sock")
+	// Assert rather than hope. If a future change lengthens this, the failure
+	// should name the reason instead of surfacing as an unexplained bind error.
+	if len(path) >= 104 {
+		t.Fatalf("socket path is %d bytes, and macOS allows 103: %s", len(path), path)
+	}
+	return path
 }
 
 func fixture(t *testing.T) Brief {
@@ -197,7 +223,7 @@ func TestNotifyPostsToNotify(t *testing.T) {
 // A coordinator that blipped and a coordinator that said no call for different
 // behaviour, so they must be distinguishable by the caller.
 func TestUnreachableAgentIsDistinguishable(t *testing.T) {
-	t.Setenv("SHABADOO_SOCKET", filepath.Join(t.TempDir(), "nothing-here.sock"))
+	t.Setenv("SHABADOO_SOCKET", shortSocketPath(t)+".absent")
 	err := New().Send(context.Background(), Message{To: "homelab", Title: "T", Body: "B"})
 	if !errors.Is(err, ErrUnreachable) {
 		t.Fatalf("got %v, want ErrUnreachable — the caller cannot tell a blip from a refusal", err)
