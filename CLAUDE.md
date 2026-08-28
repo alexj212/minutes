@@ -314,6 +314,13 @@ which is this design's worst failure in miniature. See `docs/gaps.md`.
 
 Prefer headphones. With them the problem does not exist.
 
+**And attribution requires two sources, not one microphone.** A microphone track
+means *the operator* only because the other track holds everyone else. A
+recording with nothing captured from the far end — the render endpoint idle
+throughout, or a device that cannot capture system audio at all — carries no
+speaker labels, rather than labelling the room as you. Warning over the labels
+would not do: a summariser reads lines and skims headers.
+
 ### Stopping is closing stdin, and nothing else may reach the helper
 
 A terminal Ctrl-C signals the whole foreground process group. The helper caught

@@ -56,6 +56,15 @@ const noSpeechThreshold = 0.6
 const (
 	SpeakerYou    = "You"
 	SpeakerOthers = "Others"
+	// SpeakerUnattributed is used when the recording cannot support a label at
+	// all, rather than guessing one.
+	//
+	// A microphone track means "the operator" *because* the other track holds
+	// everyone else. Remove the far-end track and that inference collapses: the
+	// microphone holds whoever was audible in the room, and calling all of it
+	// "You" puts other people's words in the operator's mouth. A missing
+	// disclosure gets noticed; a fabricated quote gets believed.
+	SpeakerUnattributed = "Unattributed"
 )
 
 // Line is one utterance placed on the recording's timeline.
@@ -102,6 +111,10 @@ type Transcript struct {
 	// BleedSuppressed counts microphone lines dropped as echoes of the system
 	// track. A large number means the meeting was played through speakers.
 	BleedSuppressed int `json:"bleedSuppressed,omitempty"`
+	// Unattributed means this recording carries no speaker labels at all,
+	// because it had only one source. Distinct from labels that exist and are
+	// doubtful.
+	Unattributed bool `json:"unattributed,omitempty"`
 	// AttributionUnreliable explains why the speaker labels below cannot be
 	// trusted, and is empty when they can.
 	//
@@ -333,11 +346,16 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			"this meeting was on speakers rather than headphones, so the microphone "+
 			"also heard the far end", dropped)
 	}
-	// Whether the speaker labels can be trusted at all. This is a precondition
-	// for attribution, not a quality check: when the far-end track holds no
-	// speech, echo suppression has no reference and the room is published as
-	// the operator.
-	checkAttribution(m, out, log)
+	// Whether this recording can support speaker labels at all, before asking
+	// whether the ones it has are any good.
+	if !hasFarEndTrack(m) {
+		unattribute(out, log)
+	} else {
+		// A precondition for attribution rather than a quality check: when the
+		// far-end track holds no speech, echo suppression has no reference and
+		// the room is published as the operator.
+		checkAttribution(m, out, log)
+	}
 
 	out.FarEndSilent = findFarEndSilence(out.Lines)
 	markFarEndSilence(out.Lines, out.FarEndSilent)
@@ -347,6 +365,48 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			clock(g.Start), roughMinutes(g.Duration()), g.Lines)
 	}
 	return out, nil
+}
+
+// hasFarEndTrack reports whether anything was captured from the far end.
+//
+// Not whether a track is listed — whether it holds audio. A track declared and
+// never written to is the same thing as no track, and treating them differently
+// would be the empty-versus-unknown mistake in a third place.
+func hasFarEndTrack(m *manifest.Manifest) bool {
+	far, ok := trackNamed(m, "system")
+	if !ok {
+		return false
+	}
+	for _, seg := range far.Segments {
+		if seg.Frames > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// unattribute strips every speaker label, because this recording cannot support
+// one.
+//
+// Deliberately not a warning header over labels that stay. A summariser reads
+// the lines and can skim the header; it cannot skim a label that is not there.
+// Making the assertion impossible is the only version of this that survives
+// contact with something that only reads the transcript.
+func unattribute(out *Transcript, log func(string, ...any)) {
+	if len(out.Lines) == 0 {
+		return
+	}
+	for i := range out.Lines {
+		out.Lines[i].Speaker = SpeakerUnattributed
+	}
+	out.Unattributed = true
+	out.AttributionUnreliable = fmt.Sprintf(
+		"Nothing was captured from the far end, so this recording is one source and "+
+			"cannot say who spoke. A microphone track means \"the operator\" only because "+
+			"the other track holds everyone else; with no other track it holds whoever was "+
+			"audible in the room. All %d line(s) below are unattributed for that reason, "+
+			"and no speaker should be inferred from them.", len(out.Lines))
+	log("%s", out.AttributionUnreliable)
 }
 
 // checkAttribution decides whether the speaker labels mean anything.
@@ -448,7 +508,11 @@ func (t *Transcript) Text() string {
 		t.Backend, map[bool]string{true: "was sent off", false: "stayed on"}[t.AudioLeftMachine])
 
 	if t.AttributionUnreliable != "" {
-		b.WriteString("#\n# ⚠ SPEAKER LABELS BELOW ARE NOT RELIABLE\n#\n")
+		banner := "# ⚠ SPEAKER LABELS BELOW ARE NOT RELIABLE"
+		if t.Unattributed {
+			banner = "# ⚠ THIS RECORDING CANNOT SAY WHO SPOKE"
+		}
+		b.WriteString("#\n" + banner + "\n#\n")
 		for _, line := range strings.Split(wrapAt(t.AttributionUnreliable, 72), "\n") {
 			fmt.Fprintf(&b, "# %s\n", line)
 		}

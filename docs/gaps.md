@@ -126,6 +126,25 @@ Found by a reviewing session that measured the margin rather than accepting the
 outcome. The number that made it visible only existed because the same session
 had earlier asked why a probability printed as exactly `0.600`.
 
+### ~~A one-source recording labelled everything as the operator~~ — fixed
+
+Found by `shabadu-ios` reasoning from the design, without reading the code, while
+asking whether a phone recording could ever be a first-class input. It could not
+capture system audio at all, so it would be one source — and every guard here
+assumed two.
+
+Checked, and the hole already existed on the desktop. With no far-end track the
+attribution gate returned without complaint and every line was labelled `You`.
+Reachable whenever the render endpoint stays idle for a whole recording, which
+is a meeting where the far end never made a sound. Observed on real hardware:
+`track system ended after 0 audio frames`.
+
+A microphone track means *the operator* only because the other track holds
+everyone else. Remove the other track and it holds whoever was audible in the
+room. Such a recording now carries **no speaker labels at all** — not a warning
+header over labels that stay, because a summariser reads the lines and can skim
+the header; it cannot skim a label that is not there.
+
 ### Speaker labels are only as good as the far-end capture
 
 Found by the `wsl` session reviewing two app-scoped recordings. When the far-end

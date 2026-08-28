@@ -654,3 +654,105 @@ func TestModelDoubtStillCatchesInventionOverSilence(t *testing.T) {
 		t.Errorf("published %d invented line(s)", len(tr.Lines))
 	}
 }
+
+// A microphone track means "the operator" only because the other track holds
+// everyone else. With no far-end track that inference collapses: the microphone
+// holds whoever was audible in the room, and labelling all of it "You" puts
+// other people's words in the operator's mouth.
+//
+// Reachable today with `minutes record --mic-only`, and it is the normal case
+// for any device that cannot capture system audio at all.
+func TestOneSourceRecordingCannotSayWhoSpoke(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic": {{Index: 0, File: "mic-000.wav", StartSeconds: 0,
+			DurationSeconds: 10, Frames: 480000, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {
+			{Start: 0, End: 3, Text: "shall we start", NoSpeechProb: 0.001},
+			{Start: 3, End: 6, Text: "yes go ahead", NoSpeechProb: 0.001},
+		},
+	}}
+
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tr.Lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(tr.Lines))
+	}
+	for _, l := range tr.Lines {
+		if l.Speaker == SpeakerYou {
+			t.Errorf("line %q was attributed to the operator on a one-source recording", l.Text)
+		}
+		if l.Speaker != SpeakerUnattributed {
+			t.Errorf("speaker = %q, want %q", l.Speaker, SpeakerUnattributed)
+		}
+	}
+	if !tr.Unattributed {
+		t.Error("the transcript does not record that it carries no speaker labels")
+	}
+
+	// And the readable form must say so where somebody reading it will see it.
+	text := tr.Text()
+	if !strings.Contains(text, "CANNOT SAY WHO SPOKE") {
+		t.Errorf("the readable transcript does not say it cannot attribute:\n%s", text)
+	}
+	if strings.Contains(text, "] You:") {
+		t.Error("the readable transcript still labels a line as the operator")
+	}
+}
+
+// A declared track that was never written to is the same thing as no track.
+// Treating them differently would be the empty-versus-unknown mistake again.
+func TestFarEndTrackWithNoAudioCountsAsAbsent(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic":    {{Index: 0, File: "mic-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 480000, PeakDBFS: -8}},
+		"system": {{Index: 0, File: "system-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 0, PeakDBFS: -999}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav": {{Start: 0, End: 3, Text: "something", NoSpeechProb: 0.001}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tr.Unattributed {
+		t.Error("a far-end track that captured nothing was treated as a far end")
+	}
+	if tr.Lines[0].Speaker != SpeakerUnattributed {
+		t.Errorf("speaker = %q, want unattributed", tr.Lines[0].Speaker)
+	}
+}
+
+// And a genuine two-track recording must still attribute, or the fix has simply
+// removed the feature.
+func TestTwoTrackRecordingStillAttributes(t *testing.T) {
+	m := buildFixture(t, map[string][]manifest.Segment{
+		"mic":    {{Index: 0, File: "mic-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 480000, PeakDBFS: -8}},
+		"system": {{Index: 0, File: "system-000.wav", StartSeconds: 0, DurationSeconds: 10, Frames: 441000, PeakDBFS: -8}},
+	})
+	fake := &fakeTranscriber{byFile: map[string][]transcribe.Utterance{
+		"mic-000.wav":    {{Start: 0, End: 3, Text: "my own words entirely", NoSpeechProb: 0.001}},
+		"system-000.wav": {{Start: 4, End: 7, Text: "and something quite different", NoSpeechProb: 0.001}},
+	}}
+	tr, err := Build(context.Background(), m, fake, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tr.Unattributed {
+		t.Fatal("a two-track recording was stripped of its labels")
+	}
+	var you, others int
+	for _, l := range tr.Lines {
+		switch l.Speaker {
+		case SpeakerYou:
+			you++
+		case SpeakerOthers:
+			others++
+		}
+	}
+	if you != 1 || others != 1 {
+		t.Errorf("got %d you and %d others, want one each", you, others)
+	}
+}
