@@ -217,7 +217,7 @@ deleting anything unprompted.
 | Platform | State — what is **built**, not what is designed |
 |---|---|
 | **Windows, driven from WSL** | records. WASAPI capture + loopback, helper started over interop |
-| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant, and macOS asks repeatedly because the helper is unsigned. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it, and expect to be asked again after a rebuild |
+| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant once. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it. The grant then persists, including across rebuilds, provided the helper was signed — `build.sh` does that automatically where a signing identity exists |
 | **native Linux desktop** | **refuses.** The PulseAudio path (source + `<sink>.monitor`) is designed and not built |
 | **WSL as the audio source** | **refuses on purpose** — `RDPSink.monitor` carries only audio from Linux apps inside WSL, so a Teams/Zoom/browser meeting never touches it |
 

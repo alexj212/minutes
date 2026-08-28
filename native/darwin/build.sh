@@ -34,4 +34,40 @@ mkdir -p "$root/dist"
     "$here/audio.swift" \
     "$here/main.swift"
 
+# Sign it, and sign it with something stable.
+#
+# An unsigned binary gets an ad-hoc signature whose designated requirement is a
+# bare cdhash — a hash of the bytes. TCC attaches its audio-capture decision to
+# that, so every rebuild is a new stranger and the operator is asked for
+# permission again. Measured: consent granted, helper rebuilt, asked again.
+#
+# A real signing identity gives a requirement based on the certificate and the
+# identifier instead, which does not move when the code does. The grant then
+# survives a rebuild, which is the difference between asking somebody once and
+# asking them every time they change a line.
+#
+# The identity is discovered rather than hardcoded, because this repo is shared
+# with machines that do not have one. Falling back to ad-hoc keeps the build
+# working there; it just does not get a durable grant.
+identity="${MINUTES_CODESIGN_IDENTITY:-}"
+if [ -z "$identity" ]; then
+    identity="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+        | /usr/bin/awk 'NR==1 && /\)/ { print $2 }')"
+fi
+
+if [ -n "$identity" ]; then
+    /usr/bin/codesign --force --sign "$identity" \
+        --identifier "io.dumpr.minutes-capture" \
+        --options runtime \
+        --timestamp=none \
+        "$out"
+    echo "signed with $identity"
+else
+    /usr/bin/codesign --force --sign - \
+        --identifier "io.dumpr.minutes-capture" \
+        "$out"
+    echo "signed ad-hoc: no codesigning identity found, so macOS will ask for" >&2
+    echo "audio permission again after every rebuild." >&2
+fi
+
 echo "built $out"

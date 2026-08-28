@@ -98,7 +98,7 @@ Verified on the target machines, not assumed:
 | Platform | Microphone | System audio | Notes |
 |---|---|---|---|
 | **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target, and R1 is built on it. Three Windows SDKs are installed, all carrying `audioclientactivationparams.h`; only the **2019** MSVC install is complete (see below) |
-| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement and no signing, but do need a `kTCCServiceAudioCapture` grant — which an unsigned helper is asked for again and again (see below) |
+| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement, but do need a `kTCCServiceAudioCapture` grant, and the helper must be **signed with a stable identity** or that grant is asked for again after every rebuild (see below) |
 | **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
 | **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
 
@@ -202,14 +202,34 @@ dialog names whatever launched it — here the session coordinator — and
 the wrong program's name. For a project that argues an active recording should
 be obvious rather than quiet, that is a known wart rather than a settled answer.
 
-**And the grant does not stick.** `build.sh` produces an ad-hoc, linker-signed
-binary — `Signature=adhoc`, no stable designated requirement — so TCC has
-nothing durable to attach a decision to. The operator was asked again after a
-rebuild, and again on runs after that. Treat consent as something that can be
-demanded at any moment rather than a setup step that happens once, which is
-why preflight reporting *waiting for a human* as its own state matters more
-here than it would on a platform that asks once and remembers. Signing the
-helper with a stable identity is the fix and is not done.
+**The grant sticks only if the helper is signed, and that is why `build.sh`
+signs it.** An unsigned binary gets an ad-hoc signature whose designated
+requirement is a bare cdhash — a hash of the bytes. TCC attaches the decision
+to that, so every rebuild is a new stranger and the operator is asked again.
+Measured: consent granted, helper rebuilt, asked again.
+
+Signing with a real identity replaces that requirement with one naming the
+identifier and the certificate:
+
+    designated => identifier "io.dumpr.minutes-capture"
+         and anchor apple generic
+         and certificate leaf[subject.CN] = "Apple Development: ..."
+
+which does not move when the code does. Proven as a pair rather than as one
+observation: a change that altered the binary moved the cdhash from
+`64589417…` to `384c54f5…` while the requirement stayed byte-identical, and
+the grant survived. Before signing the operator was asked after every rebuild;
+after it, not once.
+
+`build.sh` discovers the identity rather than hardcoding it — `security
+find-identity`, overridable with `MINUTES_CODESIGN_IDENTITY` — and falls back
+to ad-hoc with a warning, because this repo is shared with machines that have
+no signing identity. There the build still works; the grant just is not
+durable.
+
+Preflight still has to be able to report *waiting for a human* as its own
+state. Signing makes that rare rather than constant, and the first grant on any
+machine still has to be given by somebody looking at a screen.
 
 **A tap delivers nothing at all while the render endpoint is idle**, and the
 endpoint is idle at the start of every recording. So `TRACK_INFO` is emitted
