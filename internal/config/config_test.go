@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/alexj/minutes/internal/transcribe"
@@ -81,5 +82,26 @@ func TestAPIKeyComesFromTheEnvironmentNotTheFile(t *testing.T) {
 	opt := cfg.TranscribeOptions(nil)
 	if opt.APIKey != "secret-value" {
 		t.Errorf("APIKey = %q, want the environment variable's value", opt.APIKey)
+	}
+}
+
+// A default that names hardware the machine cannot have is not a preference,
+// it is a guaranteed failure — and it surfaces after the meeting, once the
+// audio is captured and somebody wants to read it.
+//
+// "cuda" was hardcoded when the only recording machine had an NVIDIA GPU. No
+// Mac has CUDA. This asserts the two cases differ rather than checking one of
+// them, because a check that only knows about this machine would pass just as
+// happily if the value were hardcoded the other way.
+func TestDefaultDeviceIsPossibleOnThisMachine(t *testing.T) {
+	got := Default().Transcription.Device
+	if got == "" {
+		t.Fatal("no default device")
+	}
+	if runtime.GOOS == "darwin" && got == "cuda" {
+		t.Errorf("default device %q on darwin — no Mac has CUDA, so this can never work", got)
+	}
+	if runtime.GOOS != "darwin" && got != "cuda" {
+		t.Errorf("default device %q off darwin, want cuda — the GPU path is deliberate there", got)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/alexj/minutes/internal/deliver"
 	"github.com/alexj/minutes/internal/session"
@@ -77,6 +78,24 @@ func Path() string {
 	return filepath.Join(home, ".config", "minutes", "config.json")
 }
 
+// defaultDevice is where local inference runs when nobody has said otherwise.
+//
+// "cuda" was hardcoded when the only machine that could record had an NVIDIA
+// GPU. No Mac has CUDA, so on darwin that default cannot work at all — it is
+// not a preference that happens to be wrong, it is a device that does not
+// exist. The failure surfaces at the end of a meeting, after the audio is
+// safely captured, which is a bad moment to discover a config default.
+//
+// Elsewhere "cuda" stays the default: the machine this was built for has a
+// usable GPU, so the confidential path is also the fast one, and whisper's
+// own error is caught and explains how to change it.
+func defaultDevice() string {
+	if runtime.GOOS == "darwin" {
+		return "cpu"
+	}
+	return "cuda"
+}
+
 // Default is what runs when nobody has said otherwise: everything stays here,
 // and a meeting goes to this machine's own session.
 func Default() *Config {
@@ -86,7 +105,7 @@ func Default() *Config {
 			Backend:   transcribe.BackendLocalWhisper,
 			Model:     "small",
 			Language:  "en",
-			Device:    "cuda",
+			Device:    defaultDevice(),
 			AfterStop: true,
 		},
 		Delivery: Delivery{
