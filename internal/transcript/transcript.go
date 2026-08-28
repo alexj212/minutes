@@ -415,6 +415,14 @@ func unattribute(out *Transcript, log func(string, ...any)) {
 	for i := range out.Lines {
 		out.Lines[i].Speaker = SpeakerUnattributed
 	}
+	// Withheld lines too. They are the ones a reader reaches for when a line
+	// is missing from the readable transcript, so a speaker asserted there is
+	// asserted at exactly the moment somebody is looking closely — and it is
+	// in the JSON, which is read by machines that cannot notice the warning
+	// in the text header.
+	for i := range out.Withheld {
+		out.Withheld[i].Speaker = SpeakerUnattributed
+	}
 	out.Unattributed = true
 	out.AttributionUnreliable = fmt.Sprintf(
 		"Nothing was captured from the far end, so this recording is one source and "+

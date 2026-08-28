@@ -783,3 +783,41 @@ func TestUnknownTrackNameIsNotAttributed(t *testing.T) {
 		}
 	}
 }
+
+// A recording that cannot say who spoke must not credit anybody in its
+// withheld lines either.
+//
+// The unattributed pass rewrote the readable lines and left Withheld alone, so
+// a one-source recording shipped `{"speaker":"You","text":"Thanks for
+// watching!"}` in transcript.json — under a header stating in capitals that
+// the recording cannot say who spoke. Withheld lines are where a reader goes
+// when a line is missing, so that is the moment somebody is looking closely;
+// and the JSON is read by machines that cannot see the warning at all.
+//
+// Found in the first real recording made on macOS, not by a test.
+func TestWithheldLinesAreUnattributedToo(t *testing.T) {
+	out := &Transcript{
+		Lines: []Line{
+			{Speaker: SpeakerYou, Text: "something said"},
+		},
+		Withheld: []Line{
+			{Speaker: SpeakerYou, Text: "Thanks for watching!", Suppressed: "no speech"},
+		},
+	}
+	unattribute(out, func(string, ...any) {})
+
+	if !out.Unattributed {
+		t.Fatal("markUnattributed did not set the flag")
+	}
+	for i, l := range out.Lines {
+		if l.Speaker != SpeakerUnattributed {
+			t.Errorf("kept line %d has speaker %q, want %q", i, l.Speaker, SpeakerUnattributed)
+		}
+	}
+	for i, l := range out.Withheld {
+		if l.Speaker != SpeakerUnattributed {
+			t.Errorf("withheld line %d has speaker %q on an unattributed recording — "+
+				"it credits somebody the recording cannot identify", i, l.Speaker)
+		}
+	}
+}

@@ -13,9 +13,9 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"runtime/debug"
-	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -1050,16 +1050,31 @@ func cmdTranscribe(args []string) int {
 		return 1
 	}
 
-	var you, others int
+	// Counted explicitly rather than by an else-branch. "Anything that is not
+	// you is everyone else" is the same inference that made a recording with
+	// one source report "0 you, 3 everyone else" directly beneath a warning
+	// saying it could not say who spoke — the tally is the line a person
+	// actually reads, so it must not contradict the disclosure above it.
+	var you, others, unattributed int
 	for _, l := range t.Lines {
-		if l.Speaker == transcript.SpeakerYou {
+		switch l.Speaker {
+		case transcript.SpeakerYou:
 			you++
-		} else {
+		case transcript.SpeakerOthers:
 			others++
+		default:
+			unattributed++
 		}
 	}
-	fmt.Printf("\n  %d lines in %s — %d you, %d everyone else\n",
-		len(t.Lines), time.Since(started).Round(time.Second), you, others)
+	took := time.Since(started).Round(time.Second)
+	if t.Unattributed {
+		fmt.Printf("\n  %d lines in %s — unattributed, this recording cannot say who spoke\n",
+			len(t.Lines), took)
+	} else {
+		fmt.Printf("\n  %d lines in %s — %d you, %d everyone else%s\n",
+			len(t.Lines), took, you, others,
+			map[bool]string{true: fmt.Sprintf(", %d unattributed", unattributed)}[unattributed > 0])
+	}
 	fmt.Printf("  %s\n", filepath.Join(dir, transcript.TextName))
 	return 0
 }
