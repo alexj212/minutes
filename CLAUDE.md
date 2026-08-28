@@ -98,7 +98,7 @@ Verified on the target machines, not assumed:
 | Platform | Microphone | System audio | Notes |
 |---|---|---|---|
 | **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target, and R1 is built on it. Three Windows SDKs are installed, all carrying `audioclientactivationparams.h`; only the **2019** MSVC install is complete (see below) |
-| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement and no signing, but do need a one-time `kTCCServiceAudioCapture` grant (see below) |
+| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement and no signing, but do need a `kTCCServiceAudioCapture` grant — which an unsigned helper is asked for again and again (see below) |
 | **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
 | **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
 
@@ -199,9 +199,17 @@ capture helper produced no report", which is true and useless.
 **TCC records the grant against the responsible process, not the helper.** The
 dialog names whatever launched it — here the session coordinator — and
 `minutes-capture` appears nowhere in System Settings. It works, and it discloses
-the wrong program's name, once. For a project that argues an active recording
-should be obvious rather than quiet, that is a known wart rather than a settled
-answer.
+the wrong program's name. For a project that argues an active recording should
+be obvious rather than quiet, that is a known wart rather than a settled answer.
+
+**And the grant does not stick.** `build.sh` produces an ad-hoc, linker-signed
+binary — `Signature=adhoc`, no stable designated requirement — so TCC has
+nothing durable to attach a decision to. The operator was asked again after a
+rebuild, and again on runs after that. Treat consent as something that can be
+demanded at any moment rather than a setup step that happens once, which is
+why preflight reporting *waiting for a human* as its own state matters more
+here than it would on a platform that asks once and remembers. Signing the
+helper with a stable identity is the fix and is not done.
 
 **A tap delivers nothing at all while the render endpoint is idle**, and the
 endpoint is idle at the start of every recording. So `TRACK_INFO` is emitted
