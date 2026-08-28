@@ -4,7 +4,11 @@
 GO      ?= go
 CMD     := ./cmd/minutes
 BIN     := dist/minutes
+ifeq ($(shell uname -s),Darwin)
+HELPER  := dist/minutes-capture
+else
 HELPER  := dist/minutes-capture.exe
+endif
 CMDEXE  := /c/Windows/System32/cmd.exe
 
 # Where `make install` puts things. ~/bin is on PATH on both this machine and
@@ -18,10 +22,21 @@ all: build helper
 build:
 	$(GO) build -o $(BIN) $(CMD)
 
-# Invokes MSVC through interop. build.bat probes for a toolchain that is
-# actually complete rather than the newest one installed.
+# The native helper for whichever machine this is.
+#
+# On WSL that means invoking MSVC through interop — build.bat probes for a
+# toolchain that is actually complete rather than the newest one installed. On
+# macOS it means the CoreAudio helper. There is deliberately no third case:
+# a platform without a helper should fail here rather than produce an
+# orchestrator that cannot record and only says so at the meeting.
+UNAME := $(shell uname -s)
+
 helper:
+ifeq ($(UNAME),Darwin)
+	native/darwin/build.sh
+else
 	$(CMDEXE) /c 'native\windows\build.bat'
+endif
 
 test:
 	$(GO) test ./...
@@ -55,13 +70,13 @@ install: build helper
 	fi
 	@mkdir -p $(PREFIX)
 	install -m 0755 $(BIN) $(PREFIX)/minutes
-	install -m 0755 $(HELPER) $(PREFIX)/minutes-capture.exe
+	@install -m 0755 $(HELPER) $(PREFIX)/$(notdir $(HELPER))
 	@echo "installed to $(PREFIX)"
 	@command -v minutes >/dev/null 2>&1 || echo "note: $(PREFIX) is not on PATH"
 	@echo "built from $$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
 
 uninstall:
-	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture.exe
+	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture $(PREFIX)/minutes-capture.exe
 
 clean:
 	rm -f $(BIN) $(HELPER) dist/*.obj

@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -93,17 +94,26 @@ func FindHelper() (string, error) {
 		return p, nil
 	}
 
-	var candidates []string
+	// The Windows helper is a PE and keeps its extension even when launched
+	// from Linux over interop; every other platform's is an ordinary binary.
+	// Both names are tried everywhere rather than switched on the host, because
+	// the host running the orchestrator is not always the host the helper was
+	// built for — that is the whole point of the WSL arrangement.
+	names := []string{"minutes-capture", "minutes-capture.exe"}
+
+	var dirs []string
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
-		candidates = append(candidates,
-			filepath.Join(dir, "minutes-capture.exe"),
-			filepath.Join(dir, "dist", "minutes-capture.exe"),
-			filepath.Join(dir, "..", "dist", "minutes-capture.exe"),
-		)
+		dirs = append(dirs, dir, filepath.Join(dir, "dist"), filepath.Join(dir, "..", "dist"))
 	}
 	if wd, err := os.Getwd(); err == nil {
-		candidates = append(candidates, filepath.Join(wd, "dist", "minutes-capture.exe"))
+		dirs = append(dirs, filepath.Join(wd, "dist"))
+	}
+	var candidates []string
+	for _, d := range dirs {
+		for _, n := range names {
+			candidates = append(candidates, filepath.Join(d, n))
+		}
 	}
 	for _, c := range candidates {
 		if _, err := os.Stat(c); err == nil {
@@ -145,13 +155,21 @@ func pulseSourcesLookLikeWSL(ctx context.Context) (bool, string) {
 
 // Run performs the checks and returns a verdict.
 func Run(ctx context.Context) (*Result, error) {
+	// macOS runs its own helper directly — there is no interop layer to cross,
+	// and no WSL trap to refuse. The helper answers the same --preflight
+	// contract, so everything below it is shared.
+	if runtime.GOOS == "darwin" {
+		return runHelperPreflight(ctx, &Result{Platform: "macos"})
+	}
+
 	if !IsWSL() {
 		return &Result{
 			Platform:  "linux",
 			CanRecord: false,
-			Refusal: "This is a native Linux host, and R1 implements Windows capture only.\n" +
-				"Capturing here needs the PulseAudio path (a source for the microphone,\n" +
-				"the sink's .monitor for system audio), which is not built yet.",
+			Refusal: "This is a native Linux host, and capture is implemented for Windows\n" +
+				"(through WSL) and macOS only. Capturing here needs the PulseAudio path —\n" +
+				"a source for the microphone, the sink's .monitor for system audio — which\n" +
+				"is not built.",
 		}, nil
 	}
 
@@ -175,17 +193,31 @@ func Run(ctx context.Context) (*Result, error) {
 		return res, nil
 	}
 
-	helper, err := FindHelper()
-	if err != nil {
+	if _, err := FindHelper(); err != nil {
 		res.CanRecord = false
 		res.Refusal = "Refusing to record: " + err.Error() + ".\n" +
 			"Windows interop works, so capture is possible here once the helper is built."
 		return res, nil
 	}
+	return runHelperPreflight(ctx, res)
+}
+
+// runHelperPreflight asks the platform's helper whether it could capture, and
+// turns its answer into a verdict.
+//
+// Shared by every platform that has a helper, because the question and the
+// refusal are the same everywhere: a device that enumerates but refuses to
+// start is what this exists to catch, and half a meeting is half a meeting
+// whatever recorded it.
+func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
+	helper, err := FindHelper()
+	if err != nil {
+		res.CanRecord = false
+		res.Refusal = "Refusing to record: " + err.Error() + "."
+		return res, nil
+	}
 	res.HelperPath = helper
 
-	// Ask the platform rather than assuming it. A device that enumerates but
-	// refuses to start is exactly what this is here to catch.
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	out, runErr := exec.CommandContext(probeCtx, helper, "--preflight").Output()
