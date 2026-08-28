@@ -30,6 +30,17 @@ Do **not** use for:
 - Summarising an arbitrary audio file. This records meetings; it is not a
   general transcription service.
 
+## What is installed
+
+```bash
+minutes version          # build, and whether the capture helper is beside it
+minutes version --json   # same, machine-readable
+```
+
+A release is **two files** — the orchestrator and a capture helper built for
+whichever OS owns the audio hardware. `version` lists both and says which is
+missing, which is the answer when recording fails and blames the helper.
+
 ## Before the meeting
 
 ```bash

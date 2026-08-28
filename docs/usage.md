@@ -23,15 +23,27 @@ by looking beside itself first, so installing one without the other leaves a
 
 Override the destination with `PREFIX=/somewhere make install`.
 
-It warns if the working tree is dirty, because Go stamps the build state into
-the binary and a dirty build cannot be reproduced from any commit. What is
-actually deployed is checkable:
+It warns if the working tree is dirty, because a dirty build cannot be
+reproduced from any commit. What is actually deployed is checkable:
 
 ```
-$ go version -m ~/bin/minutes | grep vcs
-	build	vcs.revision=74c0e07a7e58837ef7c751b58ce415cc10801e5e
-	build	vcs.modified=false
+$ minutes version
+minutes v0.5.0
+  built    2026-08-28T11:41:02Z
+  platform linux/amd64
+  minutes             linux/amd64    /home/alexj/bin/minutes
+  minutes-capture.exe windows/amd64  /home/alexj/bin/minutes-capture.exe
 ```
+
+An unstamped build reports its commit and whether the tree was dirty, so this
+answers even for something built by hand. `minutes version --json` is the same
+thing for a publisher.
+
+**A release is two files, not one.** The orchestrator is a Linux process and the
+capture helper is built for whichever OS owns the audio hardware — a Windows
+executable here, run over interop. They must land together: an orchestrator
+without its helper refuses to record and blames the helper, which is a working
+installation of nothing. `version` lists both and says which is missing.
 
 The Windows helper runs from the WSL filesystem through interop — verified,
 rather than assumed.
@@ -538,6 +550,7 @@ retry; find the loop.
 
 | Command | What it does |
 |---|---|
+| `minutes version [--json]` | What this build is, and whether the helper is installed beside it. |
 | `minutes preflight` | Report whether both tracks could be captured now. Non-zero if not. |
 | `minutes apps` | List processes producing audio, for `--app`. |
 | `minutes start [--name N] [--to PROJECT] [--app APP] [--segment 5m]` | Begin recording and return. `--app` captures one application only. |

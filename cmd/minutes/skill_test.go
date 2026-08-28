@@ -40,13 +40,26 @@ func dispatchedCommands(t *testing.T) []string {
 	}
 
 	var cmds []string
-	re := regexp.MustCompile(`case "([a-z-]+)":`)
-	for _, m := range re.FindAllStringSubmatch(body[start:start+end], -1) {
-		name := m[1]
-		if name == "help" || notForHumans[name] {
-			continue
+	// A case can carry several names — `case "version", "--version", "-v":` —
+	// so match the whole clause and pull every quoted word out of it. The
+	// narrower pattern silently saw no command at all on such a line, which is
+	// how `version` came to be documented and reported as non-existent.
+	re := regexp.MustCompile(`case ((?:"[a-z-]+",?\s*)+):`)
+	word := regexp.MustCompile(`"([a-z-]+)"`)
+	for _, clause := range re.FindAllStringSubmatch(body[start:start+end], -1) {
+		for _, m := range word.FindAllStringSubmatch(clause[1], -1) {
+			name := m[1]
+			// A case may also carry flag spellings of the same thing —
+			// "--version", "-v". Those are aliases, not commands, and a skill
+			// documenting the command has documented them.
+			if strings.HasPrefix(name, "-") {
+				continue
+			}
+			if name == "help" || notForHumans[name] {
+				continue
+			}
+			cmds = append(cmds, name)
 		}
-		cmds = append(cmds, name)
 	}
 	if len(cmds) < 5 {
 		t.Fatalf("only found %d commands in the dispatch; the parse is wrong, not the skill", len(cmds))

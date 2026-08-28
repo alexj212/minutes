@@ -19,8 +19,16 @@ PREFIX ?= $(HOME)/bin
 
 all: build helper
 
+# Stamped the way shabadoo's build does, so a publisher can verify any tool the
+# same way. Without these the binary still answers `version`, from what the
+# toolchain records about the commit — a development build should be able to say
+# which commit it is and whether the tree was dirty.
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null)
+BUILT   ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS := -X main.version=$(VERSION) -X main.built=$(BUILT)
+
 build:
-	$(GO) build -o $(BIN) $(CMD)
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) $(CMD)
 
 # The native helper for whichever machine this is.
 #

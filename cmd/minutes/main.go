@@ -7,11 +7,14 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"regexp"
 	"strconv"
 	"strings"
@@ -74,6 +77,10 @@ func parseFlags(fs *flag.FlagSet, args []string) []string {
 func usage() {
 	fmt.Fprint(os.Stderr, `minutes — record both sides of a meeting
 
+  minutes version [--json]
+        What this build is, and whether its capture helper is installed
+        beside it. --json is the shape a publisher verifies against.
+
   minutes preflight
         Report whether a recording started now would capture both tracks.
         Exits non-zero if it would not.
@@ -133,6 +140,8 @@ func main() {
 	switch os.Args[1] {
 	case "preflight":
 		os.Exit(cmdPreflight())
+	case "version", "--version", "-v":
+		os.Exit(cmdVersion(args))
 	case "start":
 		os.Exit(cmdStart(args))
 	case "stop":
@@ -230,6 +239,157 @@ func checkedHelper(ctx context.Context) string {
 		return ""
 	}
 	return res.HelperPath
+}
+
+// Build stamps, set by the linker. Empty in a plain `go build`, where the
+// version falls back to what the toolchain recorded about the commit.
+var (
+	version string
+	built   string
+)
+
+// Component is one file a release has to land.
+//
+// minutes is not one binary. The orchestrator is a Linux process and the
+// capture helper is built for whatever OS owns the audio hardware — on this
+// machine a Windows PE executed over WSL interop. They must arrive together:
+// an orchestrator without its helper refuses to record and blames the helper,
+// which is a working installation of nothing.
+type Component struct {
+	Name     string `json:"name"`
+	Platform string `json:"platform"`
+	Path     string `json:"path,omitempty"`
+	// Present is whether it is actually installed. A release that landed
+	// half-way is the failure this field exists to make visible.
+	Present bool `json:"present"`
+}
+
+// Version is what this build is, and what it needs beside it.
+//
+// The first three fields match what shabadoo emits so one publisher can verify
+// any tool the same way. Components are additive: a reader that only knows the
+// three fields is unaffected, and a reader that needs the set can have it.
+type Version struct {
+	Version    string      `json:"version"`
+	Built      string      `json:"built"`
+	Platform   string      `json:"platform"`
+	Components []Component `json:"components,omitempty"`
+}
+
+// describeVersion assembles it.
+func describeVersion() Version {
+	v := Version{
+		Version:  version,
+		Built:    built,
+		Platform: runtime.GOOS + "/" + runtime.GOARCH,
+	}
+
+	// Without ldflags, report what the toolchain recorded rather than
+	// "unknown". A development build should still be able to say which commit
+	// it is and whether the tree was dirty — that distinction has already cost
+	// this project a stale deployment nobody noticed.
+	if info, ok := debug.ReadBuildInfo(); ok {
+		var revision, vcsTime string
+		var dirty bool
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				revision = s.Value
+			case "vcs.time":
+				vcsTime = s.Value
+			case "vcs.modified":
+				dirty = s.Value == "true"
+			}
+		}
+		if v.Version == "" && revision != "" {
+			short := revision
+			if len(short) > 12 {
+				short = short[:12]
+			}
+			v.Version = short
+			if dirty {
+				v.Version += "-dirty"
+			}
+		}
+		if v.Built == "" {
+			v.Built = vcsTime
+		}
+	}
+	if v.Version == "" {
+		v.Version = "unknown"
+	}
+
+	// The orchestrator is always this binary; the helper is whatever it would
+	// actually use, found the same way a recording would find it.
+	self, _ := os.Executable()
+	v.Components = append(v.Components, Component{
+		Name: "minutes", Platform: v.Platform, Path: self, Present: self != "",
+	})
+
+	helper, err := preflight.FindHelper()
+	hc := Component{Name: "minutes-capture", Platform: helperPlatform(helper)}
+	if err == nil {
+		hc.Name, hc.Path, hc.Present = filepath.Base(helper), helper, true
+	}
+	v.Components = append(v.Components, hc)
+	return v
+}
+
+// helperPlatform names what the helper was built for, which is not this
+// machine's platform when the audio hardware belongs to another OS.
+func helperPlatform(path string) string {
+	if strings.HasSuffix(path, ".exe") {
+		return "windows/amd64"
+	}
+	if runtime.GOOS == "linux" {
+		// A Linux orchestrator with no helper found: on WSL the helper it wants
+		// is the Windows one, which is the only reason this process can reach
+		// audio at all.
+		if preflight.IsWSL() {
+			return "windows/amd64"
+		}
+	}
+	return runtime.GOOS + "/" + runtime.GOARCH
+}
+
+func cmdVersion(args []string) int {
+	fs := flag.NewFlagSet("version", flag.ExitOnError)
+	asJSON := fs.Bool("json", false, "machine-readable, for a publisher verifying a build")
+	parseFlags(fs, args)
+
+	v := describeVersion()
+	if *asJSON {
+		body, err := json.MarshalIndent(v, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%v\n", err)
+			return 1
+		}
+		fmt.Println(string(body))
+		return 0
+	}
+
+	fmt.Printf("minutes %s\n", v.Version)
+	if v.Built != "" {
+		fmt.Printf("  built    %s\n", v.Built)
+	}
+	fmt.Printf("  platform %s\n", v.Platform)
+	missing := false
+	for _, c := range v.Components {
+		state := "missing"
+		if c.Present {
+			state = c.Path
+		} else {
+			missing = true
+		}
+		fmt.Printf("  %-18s %-14s %s\n", c.Name, c.Platform, state)
+	}
+	if missing {
+		// Not an error: `version` should answer even when the installation is
+		// broken, and saying so is the whole point.
+		fmt.Println("\n  A component is missing. `minutes` needs its capture helper beside it;")
+		fmt.Println("  without it a recording refuses to start and blames the helper.")
+	}
+	return 0
 }
 
 func cmdPreflight() int {
