@@ -147,11 +147,27 @@ type Transcript struct {
 }
 
 // speakerFor maps a track name to who is on it.
+// speakerFor maps a track to who is on it, and refuses to guess.
+//
+// Only two names carry a meaning: the microphone is the operator, the system
+// track is everyone else. Anything else — a source this build does not know
+// about, a typo in a manifest, a device that records a room rather than a
+// person — gets no speaker at all.
+//
+// It used to return "Others" for everything that was not the microphone, which
+// is an assertion about who spoke made on the basis of a name not matching. A
+// track called "room" would have been published as the far end. The failure
+// mode of guessing here is somebody's words in somebody else's mouth, and the
+// failure mode of refusing is a line nobody is credited with — which is the
+// direction a mistake should fall.
 func speakerFor(track string) string {
-	if track == "mic" {
+	switch track {
+	case "mic":
 		return SpeakerYou
+	case "system":
+		return SpeakerOthers
 	}
-	return SpeakerOthers
+	return SpeakerUnattributed
 }
 
 // job is one segment queued for transcription.

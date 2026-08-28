@@ -145,6 +145,24 @@ room. Such a recording now carries **no speaker labels at all** — not a warnin
 header over labels that stay, because a summariser reads the lines and can skim
 the header; it cannot skim a label that is not there.
 
+### There is no honest track name for a device that records a room
+
+Raised by `minutes-mac` while scoping what an iOS recorder would need. A phone
+cannot capture system audio, so it produces one source — and `manifest.Track`
+has no name for that. Calling it `mic` asserts the operator, which is the
+failure everyone has already agreed on.
+
+Half of it is closed: an unrecognised track name is now attributed to nobody
+rather than to the far end. `speakerFor` used to return `Others` for anything
+that was not the microphone, so a track called `room` would have been published
+as the other party on the basis of a name not matching.
+
+**Still open:** what such a track should be called, and whether the manifest
+should carry a track *kind* separate from its name. Not decided, because nothing
+emits one yet and a name invented ahead of its first use is a guess with a
+version number. When a device does record a room, the answer has to arrive with
+it.
+
 ### Speaker labels are only as good as the far-end capture
 
 Found by the `wsl` session reviewing two app-scoped recordings. When the far-end

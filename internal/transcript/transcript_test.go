@@ -22,8 +22,8 @@ type fakeTranscriber struct {
 	remote bool
 }
 
-func (f *fakeTranscriber) Name() string                { return "fake" }
-func (f *fakeTranscriber) SendsAudioOffMachine() bool  { return f.remote }
+func (f *fakeTranscriber) Name() string               { return "fake" }
+func (f *fakeTranscriber) SendsAudioOffMachine() bool { return f.remote }
 func (f *fakeTranscriber) Transcribe(_ context.Context, paths []string) ([][]transcribe.Utterance, error) {
 	out := make([][]transcribe.Utterance, len(paths))
 	for i, p := range paths {
@@ -235,7 +235,6 @@ func TestWriteProducesBothFiles(t *testing.T) {
 		t.Errorf("timestamp not rendered as a clock:\n%s", text)
 	}
 }
-
 
 // A speech model given a file that opens with silence anchors its first
 // utterance at zero rather than where the speech is. The silence is therefore
@@ -754,5 +753,33 @@ func TestTwoTrackRecordingStillAttributes(t *testing.T) {
 	}
 	if you != 1 || others != 1 {
 		t.Errorf("got %d you and %d others, want one each", you, others)
+	}
+}
+
+// A track name this build does not recognise must not be attributed to anybody.
+//
+// speakerFor returned "Others" for everything that was not the microphone, so a
+// source called anything else — a room recording, a future track kind, a typo
+// in a manifest — was published as the far end on the basis of a name not
+// matching. Guessing here puts somebody's words in somebody else's mouth;
+// refusing leaves a line nobody is credited with, which is the direction a
+// mistake should fall.
+//
+// The question came from minutes-mac, asking what an honest track name would be
+// for a device that records a room. The answer is that there is not one yet,
+// and until there is, an unknown name must assert nothing.
+func TestUnknownTrackNameIsNotAttributed(t *testing.T) {
+	cases := map[string]string{
+		"mic":    SpeakerYou,
+		"system": SpeakerOthers,
+		"room":   SpeakerUnattributed,
+		"phone":  SpeakerUnattributed,
+		"":       SpeakerUnattributed,
+		"System": SpeakerUnattributed, // case matters; a near-miss is still unknown
+	}
+	for track, want := range cases {
+		if got := speakerFor(track); got != want {
+			t.Errorf("speakerFor(%q) = %q, want %q", track, got, want)
+		}
 	}
 }
