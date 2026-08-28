@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -219,9 +220,9 @@ func TestDegradedDeliveryIsDistinguishable(t *testing.T) {
 // case that used to be transcribed into invention.
 func TestCarriesSpeechSeparatesAMutedMicFromDigitalSilence(t *testing.T) {
 	cases := []struct {
-		name  string
-		peak  float64
-		want  bool
+		name string
+		peak float64
+		want bool
 	}{
 		{"normal speech", -8, true},
 		{"quiet speech", -30, true},
@@ -233,5 +234,37 @@ func TestCarriesSpeechSeparatesAMutedMicFromDigitalSilence(t *testing.T) {
 		if got := tr.CarriesSpeech(); got != c.want {
 			t.Errorf("%s (%.1f dBFS): CarriesSpeech = %v, want %v", c.name, c.peak, got, c.want)
 		}
+	}
+}
+
+// A manifest must not claim a machine it was not recorded on.
+//
+// This was hardcoded to "wsl/windows" for as long as that was the only thing
+// that could record, and stayed hardcoded once macOS could — so every Mac
+// recording said it came from Windows. Nothing downstream had any reason to
+// doubt it, which is what makes a confidently wrong provenance field worse
+// than a missing one.
+//
+// The check is honest about its own reach: on a WSL kernel the old hardcoded
+// value was correct, so this can only fail on a host where the two differ.
+// That is exactly the host the bug was on, and it is the reason it survived.
+func TestPlatformDescribesThisMachineRatherThanAHardcodedOne(t *testing.T) {
+	// Through New(), not platform() directly: the first version of this test
+	// called the helper and passed happily while the field New() actually
+	// writes was still hardcoded. A test that exercises a function nobody's
+	// output depends on proves nothing.
+	m := New(t.TempDir(), "id", "name", 300)
+	got := m.Platform
+	if got == "" {
+		t.Fatal("platform() is empty; a manifest with no provenance cannot be checked later")
+	}
+
+	want := map[string]string{"darwin": "macos", "windows": "windows"}[runtime.GOOS]
+	if want != "" && got != want {
+		t.Errorf("platform() = %q on %s, want %q", got, runtime.GOOS, want)
+	}
+	if runtime.GOOS != "linux" && got == "wsl/windows" {
+		t.Errorf("platform() = %q on %s — the manifest names a machine this is not",
+			got, runtime.GOOS)
 	}
 }

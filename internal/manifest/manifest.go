@@ -20,6 +20,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -216,11 +218,53 @@ func New(dir, id, name string, segmentSeconds float64) *Manifest {
 		State:          StateRecording,
 		StartedAt:      time.Now(),
 		Host:           host,
-		Platform:       "wsl/windows",
+		Platform:       platform(),
 		SegmentSeconds: segmentSeconds,
 		Recorded:       true,
 		dir:            dir,
 	}
+}
+
+// platform records what actually produced the recording.
+//
+// It was hardcoded to "wsl/windows" while that was the only thing that could
+// record, and it stayed hardcoded after macOS could — so every recording made
+// on a Mac claimed to have come from Windows. Found by reading the manifest of
+// the first real meeting recorded on one.
+//
+// A manifest is the record of provenance. A field that describes the machine
+// is worse than absent when it is confidently wrong, because nothing
+// downstream has any reason to doubt it.
+func platform() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "windows"
+	case "darwin":
+		return "macos"
+	case "linux":
+		// The orchestrator runs in WSL and drives a helper across interop, so
+		// on this kernel the recording really is Windows audio even though the
+		// process is Linux. A native Linux host cannot record at all yet, so
+		// there is no third case to get wrong.
+		if isWSL() {
+			return "wsl/windows"
+		}
+		return "linux"
+	}
+	return runtime.GOOS
+}
+
+// isWSL reports whether this is a WSL kernel.
+//
+// Duplicated from internal/preflight rather than imported, because manifest is
+// the lower-level package and importing upward would invert the dependency.
+func isWSL() bool {
+	b, err := os.ReadFile("/proc/sys/kernel/osrelease")
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(string(b))
+	return strings.Contains(s, "microsoft") || strings.Contains(s, "wsl")
 }
 
 // Dir is the directory this manifest describes.
