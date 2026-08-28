@@ -216,9 +216,9 @@ deleting anything unprompted.
 
 | Platform | State — what is **built**, not what is designed |
 |---|---|
-| **Windows, driven from WSL** | the only path that records today. WASAPI capture + loopback, helper started over interop |
+| **Windows, driven from WSL** | records. WASAPI capture + loopback, helper started over interop |
+| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs a one-time permission grant — the first `preflight` raises a dialog and **blocks until somebody answers it**, so run it before the meeting rather than at it |
 | **native Linux desktop** | **refuses.** The PulseAudio path (source + `<sink>.monitor`) is designed and not built |
-| **macOS** | **refuses.** CoreAudio process taps are R5, not started |
 | **WSL as the audio source** | **refuses on purpose** — `RDPSink.monitor` carries only audio from Linux apps inside WSL, so a Teams/Zoom/browser meeting never touches it |
 
 It also refuses when WSL interop is disabled, because the helper cannot be

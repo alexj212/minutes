@@ -98,7 +98,7 @@ Verified on the target machines, not assumed:
 | Platform | Microphone | System audio | Notes |
 |---|---|---|---|
 | **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target, and R1 is built on it. Three Windows SDKs are installed, all carrying `audioclientactivationparams.h`; only the **2019** MSVC install is complete (see below) |
-| **macOS** | avfoundation | **CoreAudio process taps** | `AudioHardwareTapping.h` + `CATapDescription.h` are in the SDK; Swift 6.3 present |
+| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement and no signing, but do need a one-time `kTCCServiceAudioCapture` grant (see below) |
 | **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
 | **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
 
@@ -140,6 +140,76 @@ Two things that cost time and are not in any documentation prominently enough:
   elapsed time**, because it delivers nothing while the target is quiet. Placing
   audio with it makes the timeline guard fire continuously — measured at 98
   re-anchors in ten seconds. Such a track is placed by wall-clock alone.
+
+### macOS: a tap, and three things the platform gets wrong
+
+Everything here was measured on the target Mac. The parts that were reasoned
+about first were, again, the parts that turned out wrong.
+
+A `CATapDescription` excluding no processes is the direct equivalent of
+system-wide WASAPI loopback, and it is read through an aggregate device. Two
+properties of that arrangement are deliberate and neither is a default worth
+relying on:
+
+- **The tap is `CATapUnmuted`.** Audio is captured *and* still reaches the
+  hardware. `CATapMuted` and `CATapMutedWhenTapped` are the refused failure —
+  the recording succeeding while the human stops hearing the meeting —
+  available as a one-line mistake.
+- **The aggregate is private and carries the default output device only as a
+  clock source.** It never becomes anybody's default and the user's output is
+  not changed. A tap-only aggregate with no sub-device *creates and starts
+  without error and then delivers nothing*, which is the enumerate-versus-start
+  failure wearing a new hat.
+
+CoreAudio reclaims taps and private aggregates when the creating process dies —
+verified across five killed helpers, nothing leaked — so a crash costs the
+recording but not the machine's audio configuration.
+
+**The sample rate both obvious properties report is not the rate audio arrives
+at.** This is the one that would have gone unnoticed:
+
+    kAudioTapPropertyFormat        -> 48000    the obvious property
+    aggregate input StreamFormat   -> 48000    the other obvious property
+    aggregate NominalSampleRate    -> 44100    the truth
+    measured delivery              -> ~44184   agrees with 44100
+
+Declaring 48000 in `TRACK_INFO` makes the orchestrator write a WAV header of
+48000 over samples that are 44100. The file opens, plays, and is 8% fast, with
+every transcript timestamp sliding — roughly ten minutes of drift across a
+two-hour call, in a recording that looks entirely fine. It was caught only
+because the wall-clock and device-position spans disagreed by 488 ms instead of
+zero, and the deficit was the same *fraction* in every run: 7.95%, 7.99% —
+44100/48000, not anything to do with silence. Read
+`kAudioDevicePropertyNominalSampleRate` on the aggregate and believe that.
+
+**Consent is a different service than you expect, it is checked later than you
+expect, and it blocks rather than fails.** The gate is `kTCCServiceAudioCapture`
+— not `kTCCServiceMicrophone` — and it is not consulted when the tap is created.
+Creating the tap and the aggregate both return `noErr` on a machine that cannot
+capture a single sample. It is checked in the `AudioDeviceCreateIOProcIDWithBlock`
+path, where it does not return "denied": it sits in a synchronous `mach_msg` to
+`coreaudiod` indefinitely, waiting for a dialog to be answered. The identical
+call on an aggregate with no tap returns instantly, which is how that was
+isolated.
+
+So every setup call is bounded and a timeout is reported as its own outcome.
+Without that the helper produces no report at all and the operator is told "the
+capture helper produced no report", which is true and useless.
+
+**TCC records the grant against the responsible process, not the helper.** The
+dialog names whatever launched it — here the session coordinator — and
+`minutes-capture` appears nowhere in System Settings. It works, and it discloses
+the wrong program's name, once. For a project that argues an active recording
+should be obvious rather than quiet, that is a known wart rather than a settled
+answer.
+
+**A tap delivers nothing at all while the render endpoint is idle**, and the
+endpoint is idle at the start of every recording. So `TRACK_INFO` is emitted
+when the track *starts*, not when its first packet arrives — matching
+`capture.cpp`, which has always done it that way. Waiting for the first packet
+loses the track entirely on a quiet machine, and the orchestrator then builds a
+manifest with no such track. "There was no far end track" and "the far end was
+silent" are different claims, and only one of them is true.
 
 ### The transport is WSL–Windows interop, and it was measured
 
@@ -306,7 +376,11 @@ on someone else's operating system is not.
   can already do the job — so the worker assembles the material and states the
   ask, and the session writes the notes. This is the same argument that already
   applied to choosing the project: it is a judgment, and a session makes it.
-- **R5 — macOS**, CoreAudio process taps, same framed-stdout shape.
+- **R5 — macOS. Done.** CoreAudio process tap through a private aggregate,
+  same framed-stdout shape, driven by the same orchestrator. Proven on the
+  target Mac with two non-silent tracks whose clocks agree to 0.004 ms. The
+  platform lies about its own sample rate, which is the part worth reading
+  before touching it.
 
 ## Conventions
 

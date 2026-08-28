@@ -304,8 +304,17 @@ leaves a trace beyond a count.
 
 These are known scope, not oversights.
 
-- **macOS** (R5). The design is settled — CoreAudio process taps, same
-  framed-stdout shape — and the headers are present on the target machine.
+- ~~**macOS** (R5).~~ **Built and proven.** A CoreAudio process tap read
+  through a private aggregate, same framed-stdout shape, same orchestrator.
+  Two non-silent tracks with clocks agreeing to 0.004 ms. Three things were
+  learned doing it, all in [CLAUDE.md](../CLAUDE.md#macos-a-tap-and-three-things-the-platform-gets-wrong):
+  the platform reports a sample rate it does not deliver at, and believing it
+  writes every WAV header 8% fast; consent is `kTCCServiceAudioCapture`,
+  checked in the IOProc path rather than at tap creation, and it blocks
+  indefinitely rather than failing; and a tap delivers nothing while the render
+  endpoint is idle, so `TRACK_INFO` must be emitted when a track starts rather
+  than when its first packet arrives, or a quiet machine yields no track at
+  all.
 - **Native Linux.** The PulseAudio path (a source, plus the sink's `.monitor`)
   is described but not implemented. `preflight` refuses there rather than
   pretending.
@@ -403,4 +412,8 @@ What is left:
    more in it.
 4. **Background room audio during a meeting.** `--app` removes what the machine
    plays; it cannot remove what the room says while the far end is talking.
-5. **R5, macOS.**
+5. **The macOS consent dialog names the responsible process, not the
+   recorder.** The one moment the OS tells a human "this program wants to
+   record you", it names whatever launched the helper. That makes an
+   out-of-band indicator carry the disclosure, which is an argument for item 1
+   rather than against it.

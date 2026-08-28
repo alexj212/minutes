@@ -1,6 +1,6 @@
 # Where this stands
 
-Last updated 2026-08-25, after R4 and the first real meeting.
+Last updated 2026-08-28, after R5 — macOS capture, proven on the target Mac.
 
 The plan is in [CLAUDE.md](../CLAUDE.md); this is what became of it. It exists
 so that the difference between *built*, *proven*, and *assumed* stays visible,
@@ -17,7 +17,7 @@ mattered.
 | **R2** — orchestrator | **done** | Segments, manifest, `start`/`stop`/`status`/`list`, storage on disk |
 | **R3** — transcription | **done** | Per track, merged on the shared clock, local by default |
 | **R4** — summary and delivery | **done, reshaped** | Delivery to a session's inbox; summarising moved out of the worker |
-| **R5** — macOS | not started | CoreAudio process taps, same framed-stdout shape |
+| **R5** — macOS | **done** | CoreAudio process tap through a private aggregate, same framed-stdout shape |
 
 ### Two deliberate departures
 
@@ -175,4 +175,7 @@ Everything the first real call exposed is closed:
    now drop a line and leave only a count behind.
 3. **A desktop indicator on Windows**, where the meeting actually happens. The
    marker file and the notification help; neither is on screen.
-4. **R5, macOS.**
+4. **The consent dialog names the wrong program on macOS.** TCC records the
+   audio-capture grant against the responsible process — whatever launched the
+   helper — so `minutes-capture` appears nowhere in System Settings. It works;
+   it discloses the wrong thing.

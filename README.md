@@ -3,8 +3,9 @@
 Records a meeting from a desktop — **both sides of it** — so that afterwards
 somebody can answer what was decided.
 
-**R1 to R4 are done and in use on Windows**: capture, storage and lifecycle,
-transcription, and delivery. macOS is R5 and is absent.
+**R1 to R5 are done**: capture, storage and lifecycle, transcription, and
+delivery. In daily use on Windows through WSL; macOS capture is built and
+proven on the target Mac.
 
 - **[docs/status.md](docs/status.md)** — the plan, what is built, and what is proven versus assumed.
 - **[docs/usage.md](docs/usage.md)** — how to use it, command by command.
@@ -84,20 +85,26 @@ nightly forever.
 
 ## The shape of it
 
-A C++ helper built with MSVC captures both endpoints and writes framed,
-timestamped chunks to stdout. A Go orchestrator in WSL runs that helper over
-interop, reads the frames, and writes one WAV per track.
+A native helper captures both endpoints and writes framed, timestamped chunks
+to stdout. One Go orchestrator reads those frames and writes one WAV per track,
+and it does not know or care which platform produced them.
 
 ```
 minutes (Linux/WSL)  ──exec──▶  minutes-capture.exe (Windows)
                                     ├─ WASAPI capture   → track 0, microphone
                                     └─ WASAPI loopback  → track 1, system
         ◀── framed timestamped chunks on stdout ──┘
+
+minutes (macOS)      ──exec──▶  minutes-capture (Swift)
+                                    ├─ HAL audio unit   → track 0, microphone
+                                    └─ CoreAudio tap    → track 1, system
+        ◀── framed timestamped chunks on stdout ──┘
 ```
 
-The orchestrator stays a Linux process, which is the point: it keeps
+On Windows the orchestrator stays a Linux process, which is the point: it keeps
 authenticating to shabadoo's agent socket by file permissions, and needs no
-device token. A Windows-side orchestrator would have needed one.
+device token. A Windows-side orchestrator would have needed one. On macOS there
+is no boundary to cross, and the same orchestrator runs the helper directly.
 
 ## Segments land on the same boundaries in both tracks
 
@@ -321,12 +328,13 @@ recording with no supervisor alive is reported as `interrupted`, not as
 
 ## Where this stands
 
-Built and used on Windows through WSL. The numbers below were measured on the
-target machine, not estimated:
+Built and used on Windows through WSL, and built and proven on macOS. The
+numbers below were measured on the target machines, not estimated:
 
 | | |
 |---|---|
-| Track alignment | **0.37 ms**, across two streams at different sample rates |
+| Track alignment | **0.37 ms** on Windows, across two streams at different sample rates |
+| Clock agreement | **0.004 ms** on macOS, wall clock against the device counter |
 | Segment boundaries | exact — 176400 frames at 44.1 kHz, 192000 at 48 kHz |
 | Transcription | **7.4x real time** on an RTX 2080 SUPER with whisper `small` |
 | Disk | **1.33 GB/hour** for both tracks |
@@ -337,4 +345,6 @@ proven against real hardware and what is still taken on trust.
 
 ## Next
 
-**R5** — macOS, CoreAudio process taps, the same framed-stdout shape.
+Native Linux capture, and the items in [docs/gaps.md](docs/gaps.md) — a desktop
+indicator where the meeting actually happens, a level check before recording
+rather than after, and `minutes config`.
