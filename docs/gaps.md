@@ -436,3 +436,23 @@ What is left:
    record you", it names whatever launched the helper. That makes an
    out-of-band indicator carry the disclosure, which is an argument for item 1
    rather than against it.
+
+   Now measured rather than guessed at, and it is not a launch-shape problem.
+   Across 24 attribution checks — the helper run directly, run under `setsid`
+   as its own session leader, and spawned by the orchestrator as it really
+   runs — TCC named `shabadoo` every single time. Responsibility is inherited
+   through the process ancestry and is not broken by a new session or process
+   group. Signing did not change it either, though it did make the helper
+   identifiable: TCC now records `identifier=io.dumpr.minutes-capture` as the
+   accessing process while still holding the launcher responsible. It knows
+   what the recorder is and reports the other name anyway.
+
+   The escape hatch exists and has a price. `responsibility_spawnattrs_setdisclaim`
+   is present on the system; a parent that sets it makes the child its own
+   responsible process, which would put `minutes-capture` in the dialog and in
+   System Settings. But it is a `posix_spawnattr` applied by the parent at
+   spawn time, and Go's `os/exec` uses fork/exec with no hook for spawn
+   attributes — so it means cgo, in the orchestrator that is shared with
+   Windows, for a disclosure improvement rather than a functional one. That
+   trade is a judgment about how much the honest name is worth, which is why
+   it is written down here rather than decided quietly.
