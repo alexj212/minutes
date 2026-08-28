@@ -472,5 +472,11 @@ What is left:
    spawn time, and Go's `os/exec` uses fork/exec with no hook for spawn
    attributes — so it means cgo, in the orchestrator that is shared with
    Windows, for a disclosure improvement rather than a functional one. That
-   trade is a judgment about how much the honest name is worth, which is why
-   it is written down here rather than decided quietly.
+   **Decided: a real cost accepted, not an open question.** Not merely because
+   cgo is expensive, but because this particular cgo costs the property the
+   architecture is built on — the helpers are native where the platform forces
+   it and the orchestrator builds anywhere. cgo in `internal/capture` makes
+   that "portable except on darwin", and no single host can produce a full
+   release set already. The trigger to revisit is the moment something else
+   carries the disclosure instead, because whatever does that job had better
+   name the right program.

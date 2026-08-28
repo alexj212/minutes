@@ -199,8 +199,27 @@ capture helper produced no report", which is true and useless.
 **TCC records the grant against the responsible process, not the helper.** The
 dialog names whatever launched it — here the session coordinator — and
 `minutes-capture` appears nowhere in System Settings. It works, and it discloses
-the wrong program's name. For a project that argues an active recording should
-be obvious rather than quiet, that is a known wart rather than a settled answer.
+the wrong program's name.
+
+Measured rather than assumed, and it is not a launch-shape problem: across 24
+attribution checks — run directly, run under `setsid`, and spawned by the
+orchestrator — TCC named the launcher every time. Signing did not change who
+is held responsible, only what is known about the accessor, which now records
+as `io.dumpr.minutes-capture`. The system can name the recorder and reports
+the launcher anyway.
+
+`responsibility_spawnattrs_setdisclaim` would fix it, but it is a
+`posix_spawnattr` applied by the parent and Go's `os/exec` has no hook for
+one — so it means cgo in `internal/capture`, which is the half of this project
+that builds anywhere. The helpers are native because the platform forces it;
+the orchestrator is portable because nothing forces it not to be. Spending
+that on a disclosure improvement would make it "portable except on darwin",
+which is the kind of exception that does not come back.
+
+**So this is a real cost accepted, not an open question.** The trigger to
+revisit is not somebody complaining about the dialog: it is the moment
+something else carries the disclosure instead — a desktop indicator, most
+likely — because whatever does that job had better name the right program.
 
 **The grant sticks only if the helper is signed, and that is why `build.sh`
 signs it.** An unsigned binary gets an ad-hoc signature whose designated
