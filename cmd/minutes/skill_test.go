@@ -187,3 +187,64 @@ func TestSkillDocumentsEveryAdvertisedFlag(t *testing.T) {
 		}
 	}
 }
+
+// The skill's platform table must not contradict what is actually built.
+//
+// R5 landed and the platform table was updated; a line in the "do not use for"
+// list saying macOS was not built was not. That list is what a session reads to
+// decide whether to reach for the tool at all, so it is the most expensive place
+// to be wrong — and because the payload had vendored the pre-R5 copy, the stale
+// half was what every node carried.
+//
+// Caught by shabadoo-wsl reading the file, not by any test here. The pin is
+// cheap: a helper build script existing means that platform is supported.
+func TestSkillDoesNotDenyAPlatformThatIsBuilt(t *testing.T) {
+	skill, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower := strings.ToLower(string(skill))
+
+	for _, p := range []struct {
+		build  string
+		names  []string
+		denied []string
+	}{
+		{
+			build:  "../../native/darwin/build.sh",
+			names:  []string{"macos", "mac"},
+			denied: []string{"not built", "not started", "r5 is not", "refuses"},
+		},
+		{
+			build:  "../../native/windows/build.bat",
+			names:  []string{"windows"},
+			denied: []string{"not built", "not started"},
+		},
+	} {
+		if _, err := os.Stat(p.build); err != nil {
+			continue // that platform genuinely has no helper
+		}
+		for _, line := range strings.Split(lower, "\n") {
+			// Word-bounded: "mac" is a substring of "machine", and this file
+			// says "on this machine" constantly. A substring match would fire
+			// on unrelated lines and get switched off.
+			mentionsPlatform := false
+			for _, n := range p.names {
+				if regexp.MustCompile(`\b` + n + `\b`).MatchString(line) {
+					mentionsPlatform = true
+					break
+				}
+			}
+			if !mentionsPlatform {
+				continue
+			}
+			for _, d := range p.denied {
+				if strings.Contains(line, d) {
+					t.Errorf("%s exists, so that platform is built, but the skill says:\n  %s\n"+
+						"A session reads this to decide whether to reach for the tool at all.",
+						p.build, strings.TrimSpace(line))
+				}
+			}
+		}
+	}
+}

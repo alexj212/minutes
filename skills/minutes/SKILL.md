@@ -21,8 +21,6 @@ produces no durable record of what was decided is the problem being solved.
 - **Writing the notes** when a delivery brief lands in this session's inbox.
 
 Do **not** use for:
-- Recording on **mac** — the CoreAudio capture helper (R5) is not built yet.
-  `preflight` will say so. Do not improvise with `ffmpeg`.
 - Recording **inside WSL** as the audio source. `RDPSink.monitor` only carries
   audio from Linux apps inside WSL, so a Teams/Zoom/browser meeting never
   touches it. The tool captures Windows audio through interop and refuses
@@ -172,6 +170,8 @@ can be redone. Bring the refusal to the user; do not clear it on their behalf.
 | something is already recording | `--force` | records the same meeting twice and makes a bare `stop` ambiguous |
 | `--app` matched nothing, or two things | (none) | naming the wrong process records silence |
 | preflight says an endpoint will not start | (none) | the recording would be missing half the conversation |
+| preflight is **waiting** for a permission dialog | (none) | nothing is broken; somebody has to answer it. Do not report this as a failure |
+| a one-source recording carries **no speaker labels** | (none) | with nothing captured from the far end the microphone holds whoever was in the room, not the operator. Never re-attribute those lines |
 
 ## Audio leaves this machine only when told to
 

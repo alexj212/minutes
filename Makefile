@@ -15,7 +15,7 @@ CMDEXE  := /c/Windows/System32/cmd.exe
 # the Mac, which is why it is the default rather than /usr/local/bin.
 PREFIX ?= $(HOME)/bin
 
-.PHONY: all build helper test vet clean install uninstall preflight record
+.PHONY: all build helper test vet clean install uninstall dist preflight record
 
 all: build helper
 
@@ -82,6 +82,25 @@ install: build helper
 	@echo "installed to $(PREFIX)"
 	@command -v minutes >/dev/null 2>&1 || echo "note: $(PREFIX) is not on PATH"
 	@echo "built from $$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
+
+# A publishable release set for THIS machine, and only this machine.
+#
+# minutes cannot cross-build a release the way a pure-Go tool can. The
+# orchestrator cross-compiles happily; the capture helpers do not — the Windows
+# one needs MSVC reachable over interop, the macOS one needs swiftc and a
+# signing identity. So a release set is built on the machine it targets, and
+# there is no host that can produce all of them.
+#
+# That is a fact about the tool rather than a limitation to route around: the
+# helper exists precisely because the audio APIs are not portable.
+dist: build helper
+	@rm -rf dist/release && mkdir -p dist/release
+	@cp $(BIN) dist/release/
+	@cp $(HELPER) dist/release/
+	@$(BIN) version --json > dist/release/version.json
+	@echo "release set for $$($(BIN) version --json | grep '"platform"' | head -1 | cut -d'"' -f4):"
+	@ls -1 dist/release | sed 's/^/  /'
+	@echo "  (built here; the other platform's set must be built on that machine)"
 
 uninstall:
 	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture $(PREFIX)/minutes-capture.exe
