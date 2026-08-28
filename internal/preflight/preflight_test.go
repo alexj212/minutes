@@ -147,3 +147,76 @@ func TestStorageRateIgnoresUnavailableTracks(t *testing.T) {
 		t.Errorf("StorageBytesPerSecond = %d, want %d", got, want)
 	}
 }
+
+// Waiting for a person is not a fault. An error means fix the machine; a wait
+// means look at the screen and answer something. Collapsing them tells an
+// operator "the capture helper produced no report", which is true and useless —
+// the helper is sitting there waiting to be allowed to work.
+func TestWaitingForConsentReadsAsAnInstructionNotAFault(t *testing.T) {
+	res := runWithHelper(t, `{
+  "platform": "macos",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "input", "device": "MacBook Air Microphone", "sampleRate": 48000, "channels": 1, "bitsPerSample": 32, "formatTag": 3},
+    "system": {"ok": false, "mode": "global tap", "waiting": "system audio capture is waiting for permission — look for a dialog"}
+  },
+  "ok": false
+}`)
+
+	if res.CanRecord {
+		t.Fatal("CanRecord is true while a track is waiting for consent")
+	}
+	if !res.System.BlockedOnConsent() {
+		t.Fatal("a waiting track was not recognised as blocked on consent")
+	}
+	for _, want := range []string{"waiting for your permission", "Answer the dialog", "nothing to fix"} {
+		if !strings.Contains(res.Refusal, want) {
+			t.Errorf("the refusal does not read as an instruction; missing %q:\n%s", want, res.Refusal)
+		}
+	}
+	// It must not read as a broken machine.
+	for _, wrong := range []string{"cannot be captured", "Check that the endpoint"} {
+		if strings.Contains(res.Refusal, wrong) {
+			t.Errorf("a consent wait was reported as a fault: %q appears in:\n%s", wrong, res.Refusal)
+		}
+	}
+	if !strings.Contains(res.Describe(), "WAIT") {
+		t.Errorf("the rendered status does not distinguish a wait:\n%s", res.Describe())
+	}
+}
+
+// A genuine fault must still read as one, or the distinction is decorative.
+func TestGenuineFaultStillReadsAsAFault(t *testing.T) {
+	res := runWithHelper(t, `{
+  "platform": "macos",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "input", "device": "Mic", "sampleRate": 48000, "channels": 1},
+    "system": {"ok": false, "mode": "global tap", "error": "no such device", "hresult": "0x80070490"}
+  },
+  "ok": false
+}`)
+	if res.System.BlockedOnConsent() {
+		t.Error("a fault was treated as a consent wait")
+	}
+	if !strings.Contains(res.Refusal, "cannot be captured") {
+		t.Errorf("a genuine fault no longer reads as one:\n%s", res.Refusal)
+	}
+	if strings.Contains(res.Refusal, "Answer the dialog") {
+		t.Error("a fault was reported as something a person can answer")
+	}
+}
+
+// A track that is merely not ok, with nothing said about why, is a fault and not
+// a wait — absent is not the same as waiting.
+func TestSilenceAboutTheReasonIsNotAWait(t *testing.T) {
+	res := runWithHelper(t, `{
+  "platform": "macos",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "input", "device": "Mic"},
+    "system": {"ok": false, "mode": "global tap"}
+  },
+  "ok": false
+}`)
+	if res.System.BlockedOnConsent() {
+		t.Error("a track with no stated reason was treated as waiting for a person")
+	}
+}

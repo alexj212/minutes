@@ -33,7 +33,23 @@ type TrackStatus struct {
 	FormatTag     int    `json:"formatTag,omitempty"`
 	Error         string `json:"error,omitempty"`
 	HResult       string `json:"hresult,omitempty"`
+	// Waiting is set when the platform is blocked on a human rather than
+	// broken: a consent dialog is open and nothing will proceed until somebody
+	// answers it.
+	//
+	// A third state, not a kind of error. An error means fix the machine; a
+	// wait means look at the screen. Collapsing them tells an operator "the
+	// capture helper produced no report", which is true and useless — the
+	// helper is sitting there waiting to be allowed to work.
+	//
+	// Rare rather than routine: on macOS the grant is per-machine once the
+	// helper is signed. But the first one on any new machine still has to be
+	// given by somebody looking at a screen, and nothing else can give it.
+	Waiting string `json:"waiting,omitempty"`
 }
+
+// BlockedOnConsent reports a track that is waiting for a person.
+func (t TrackStatus) BlockedOnConsent() bool { return !t.OK && t.Waiting != "" }
 
 // Result is the verdict.
 type Result struct {
@@ -218,6 +234,11 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 	}
 	res.HelperPath = helper
 
+	// The helper bounds each of its own setup calls well inside this, so that a
+	// call blocked on consent returns a "waiting" report rather than being
+	// killed here and surfacing as "produced no report". The two numbers are
+	// coupled: shortening this without telling the helper authors turns a
+	// legible wait back into a silent timeout.
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 	out, runErr := exec.CommandContext(probeCtx, helper, "--preflight").Output()
@@ -237,6 +258,27 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 	res.Mic = rep.Tracks.Microphone
 	res.System = rep.Tracks.System
 	res.CanRecord = rep.Tracks.Microphone.OK && rep.Tracks.System.OK
+
+	// Waiting for a person is not a fault, and telling somebody to fix their
+	// machine when the machine is asking them a question wastes the one action
+	// that would actually work.
+	if !res.CanRecord && (res.Mic.BlockedOnConsent() || res.System.BlockedOnConsent()) {
+		var b strings.Builder
+		b.WriteString("Not recording yet: this machine is waiting for your permission.\n\n")
+		for _, t := range []struct {
+			label string
+			st    TrackStatus
+		}{{"microphone", res.Mic}, {"system audio", res.System}} {
+			if t.st.BlockedOnConsent() {
+				fmt.Fprintf(&b, "  %s: %s\n", t.label, t.st.Waiting)
+			}
+		}
+		b.WriteString("\nAnswer the dialog, then run this again. Nothing here is broken and\n")
+		b.WriteString("there is nothing to fix — the helper is waiting to be allowed to work.\n")
+		b.WriteString("Worth doing before the meeting rather than at it.")
+		res.Refusal = b.String()
+		return res, nil
+	}
 
 	if !res.CanRecord {
 		var b strings.Builder
@@ -282,10 +324,13 @@ func (r *Result) Describe() string {
 		if t.Mode == "" && !t.OK {
 			return
 		}
-		if t.OK {
+		switch {
+		case t.OK:
 			fmt.Fprintf(&b, "  %-7s ok   %-16s %s  %d Hz, %d ch, %d-bit\n",
 				label, t.Mode, t.Device, t.SampleRate, t.Channels, t.BitsPerSample)
-		} else {
+		case t.BlockedOnConsent():
+			fmt.Fprintf(&b, "  %-7s WAIT %-16s %s\n", label, t.Mode, t.Waiting)
+		default:
 			fmt.Fprintf(&b, "  %-7s FAIL %-16s %s %s\n", label, t.Mode, t.Error, t.HResult)
 		}
 	}

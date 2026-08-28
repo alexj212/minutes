@@ -68,6 +68,38 @@ rather than recorded.
 UTF-8 text. Diagnostics travel in-band so a failure keeps its position in the
 timeline instead of arriving out of order on stderr.
 
+## The preflight report
+
+`--preflight` answers one question — would a recording started now capture both
+sides — as JSON, per track. A track is `ok`, or it is not, and a track that is
+not says which of two things happened:
+
+| Field | Meaning |
+|---|---|
+| `error` | The platform refused or failed. Fix the machine. |
+| `waiting` | A consent dialog is open. Look at the screen and answer it. |
+
+**These are different states, not two kinds of failure.** An error tells the
+operator to fix something; a wait tells them to answer something, and the helper
+is sitting there ready to work. Reporting a wait as an error produces "the
+capture helper produced no report", which is true and useless.
+
+A helper must therefore **bound any setup call that can block indefinitely** and
+report the timeout as `waiting` rather than letting the orchestrator's own
+20-second probe kill it. Those two numbers are coupled: shortening the probe
+without telling a helper's author turns a legible wait back into a silent
+timeout. The macOS helper uses 8 seconds per call for that reason.
+
+`mode` is free text describing how the platform captured — `global tap`,
+`process tap`, `input`, `wasapi-loopback`. It is displayed, never matched on,
+so a platform may name as many distinct modes as it genuinely has. `--app-pid`
+failing is a different conversation from the whole machine failing, and the mode
+is where that difference shows.
+
+Exit status stays binary: zero when both tracks can be captured, non-zero
+otherwise, including while waiting. A recording cannot start either way, and a
+third status would invite a caller to treat consent as success.
+
 ## Two tracks, never one mix
 
 Track 0 is the microphone and track 1 is the system. They are never summed.
