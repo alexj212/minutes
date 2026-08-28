@@ -54,6 +54,8 @@ struct TrackReport {
     var formatTag = 0
     var error = ""
     var status = ""
+    /// Blocked on a person, not broken. See docs/protocol.md.
+    var waiting = ""
 
     var json: String {
         var parts = ["\"ok\": \(ok)", "\"mode\": \(jsonString(mode))"]
@@ -64,6 +66,7 @@ struct TrackReport {
         if formatTag > 0 { parts.append("\"formatTag\": \(formatTag)") }
         if !error.isEmpty { parts.append("\"error\": \(jsonString(error))") }
         if !status.isEmpty { parts.append("\"hresult\": \(jsonString(status))") }
+        if !waiting.isEmpty { parts.append("\"waiting\": \(jsonString(waiting))") }
         return "{" + parts.joined(separator: ", ") + "}"
     }
 }
@@ -125,22 +128,27 @@ func runPreflight(micOnly: Bool, systemOnly: Bool, appPID: pid_t?) -> Int32 {
         let openStatus = s.open()
         if openStatus != noErr {
             sys.mode = appPID != nil ? "process tap" : "global tap"
-            if openStatus == kAudioDevicePermissionsError {
-                sys.error = "system audio capture is waiting for permission. macOS asks " +
-                            "for it the first time, and the request is still unanswered — " +
-                            "look for a dialog asking to allow audio recording, or grant it " +
-                            "in System Settings under Privacy & Security."
+            if s.timedOutWaiting {
+                // A wait, not a fault: the helper is ready and macOS is holding
+                // it until somebody answers. Deliberately no `error` — a track
+                // carrying both would be read as broken, and the operator would
+                // go looking for something to fix.
+                sys.waiting = "system audio capture is waiting for permission — look for a dialog"
             } else {
                 sys.error = "the system audio tap could not be created"
+                sys.status = describe(openStatus)
             }
-            sys.status = describe(openStatus)
         } else {
             let startStatus = s.start()
             if startStatus != noErr {
                 sys.mode = appPID != nil ? "process tap" : "global tap"
                 sys.device = s.deviceLabel
-                sys.error = "the system audio tap was created but would not start"
-                sys.status = describe(startStatus)
+                if s.timedOutWaiting {
+                    sys.waiting = "system audio capture is waiting for permission — look for a dialog"
+                } else {
+                    sys.error = "the system audio tap was created but would not start"
+                    sys.status = describe(startStatus)
+                }
             } else {
                 sys = report(s.streamFormat, device: s.deviceLabel,
                              mode: appPID != nil ? "process tap" : "global tap")

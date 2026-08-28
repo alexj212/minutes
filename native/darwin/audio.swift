@@ -343,6 +343,13 @@ final class SystemCapture: @unchecked Sendable {
     private var started = false
     private let processScoped: Bool
     private var label = "system audio"
+    /// Set when a setup call was abandoned on its timeout rather than failing.
+    ///
+    /// Kept separate from any OSStatus, because "nobody has answered the dialog
+    /// yet" and "permission was refused" are different answers and the operator
+    /// does different things about them. Reusing one status for both is the
+    /// collapse the waiting state exists to prevent.
+    private(set) var timedOutWaiting = false
 
     init(appPID: pid_t?) {
         self.processScoped = appPID != nil
@@ -458,6 +465,7 @@ final class SystemCapture: @unchecked Sendable {
         }
         switch outcome {
         case .timedOut:
+            timedOutWaiting = true
             return kAudioDevicePermissionsError
         case .value(let (s, proc)):
             if s != noErr { return s }
@@ -473,7 +481,9 @@ final class SystemCapture: @unchecked Sendable {
         let agg = aggID
         let outcome = bounded(seconds: 8.0) { AudioDeviceStart(agg, proc) }
         switch outcome {
-        case .timedOut: return kAudioDevicePermissionsError
+        case .timedOut:
+            timedOutWaiting = true
+            return kAudioDevicePermissionsError
         case .value(let s):
             if s == noErr {
                 started = true
