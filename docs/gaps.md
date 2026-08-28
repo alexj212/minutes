@@ -145,7 +145,7 @@ room. Such a recording now carries **no speaker labels at all** — not a warnin
 header over labels that stay, because a summariser reads the lines and can skim
 the header; it cannot skim a label that is not there.
 
-### "Not you" was read as "the far end" in four separate places
+### ~~"Not you" was read as "the far end" in four separate places~~ — fixed
 
 Closed, and recorded because the shape recurred four times before anyone
 counted. Each site independently wrote `if speaker == You { you++ } else
@@ -438,8 +438,25 @@ proven — see below — and what it exposed is listed as a gap of its own.*
   accents is *adequate*, not good — it is a record of what was said, not a
   reliable quote source.
 
-- **Anything but this machine.** One Windows host through WSL, one microphone,
-  one output device, one GPU. Every measurement in this project comes from it.
+- ~~**Anything but this machine.**~~ **Partly closed.** A second host now
+  records: macOS captured, segmented, transcribed and delivered a real meeting
+  end to end. What it cost was four bugs no test had caught, two of them
+  platform defaults that were correct on the only machine that had ever run
+  them — `manifest.Platform` hardcoded `wsl/windows`, and a `cuda` device
+  default no Mac can satisfy, which fails *after* a meeting is captured. Still
+  one Windows host, one Mac, and no Linux desktop.
+- **A faster device on macOS.** `torch.backends.mps.is_available()` is true on
+  the Mac and the default there is `cpu`, which transcribed 30 s of audio in
+  11 s. openai-whisper's MPS support has historically been unreliable, so this
+  is listed rather than defaulted: it needs measuring before it is believed,
+  which is the same rule the rest of this file follows.
+- **That a message to a session which is not running is delivered when it
+  starts.** `deliver` has no fallback for that case because shabadoo's
+  `CLAUDE.md` states mail is stored against the id a project would have and
+  drains at startup. That claim is load-bearing here and this project has never
+  tested it. If it is wrong, the failure is the quiet kind: the file is written,
+  the operator is told it was sent, and nobody reads it. Asked of `wsl`
+  2026-08-28.
 
 ---
 
