@@ -1055,25 +1055,15 @@ func cmdTranscribe(args []string) int {
 	// one source report "0 you, 3 everyone else" directly beneath a warning
 	// saying it could not say who spoke — the tally is the line a person
 	// actually reads, so it must not contradict the disclosure above it.
-	var you, others, unattributed int
-	for _, l := range t.Lines {
-		switch l.Speaker {
-		case transcript.SpeakerYou:
-			you++
-		case transcript.SpeakerOthers:
-			others++
-		default:
-			unattributed++
-		}
-	}
+	c := transcript.Count(t.Lines)
 	took := time.Since(started).Round(time.Second)
 	if t.Unattributed {
 		fmt.Printf("\n  %d lines in %s — unattributed, this recording cannot say who spoke\n",
 			len(t.Lines), took)
 	} else {
 		fmt.Printf("\n  %d lines in %s — %d you, %d everyone else%s\n",
-			len(t.Lines), took, you, others,
-			map[bool]string{true: fmt.Sprintf(", %d unattributed", unattributed)}[unattributed > 0])
+			len(t.Lines), took, c.You, c.Others,
+			map[bool]string{true: fmt.Sprintf(", %d unattributed", c.Unattributed)}[c.Unattributed > 0])
 	}
 	fmt.Printf("  %s\n", filepath.Join(dir, transcript.TextName))
 	return 0

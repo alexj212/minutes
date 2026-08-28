@@ -337,3 +337,37 @@ func TestNotesAndBriefTitlesDiffer(t *testing.T) {
 		t.Errorf("both titled %q; a session cannot tell a request from a delivery", n.Title())
 	}
 }
+
+// The brief is the input to whoever writes the notes, so a false attribution
+// split in it is worse than the same mistake on a console: it is prose, and
+// there is no field beside it a reader can check it against.
+//
+// Asserted as a pair rather than against the unattributed case alone. A test
+// that only knew what an unattributed brief says would pass just as happily if
+// every brief said it — which is the blindness that let three copies of the
+// same else-branch survive.
+func TestBriefDoesNotSplitLinesItCannotAttribute(t *testing.T) {
+	attributed := fixture(t).Body()
+
+	b := fixture(t)
+	b.Transcript.Unattributed = true
+	for i := range b.Transcript.Lines {
+		b.Transcript.Lines[i].Speaker = transcript.SpeakerUnattributed
+	}
+	unattributed := b.Body()
+
+	if attributed == unattributed {
+		t.Fatal("a recording that cannot say who spoke produces the same brief as one that can")
+	}
+	if !strings.Contains(attributed, "1 yours, 1 everyone else's") {
+		t.Errorf("a two-source recording lost its split:\n%s", attributed)
+	}
+	for _, never := range []string{"0 yours", "yours,"} {
+		if strings.Contains(unattributed, never) {
+			t.Errorf("brief claims an attribution split it cannot support (%q):\n%s", never, unattributed)
+		}
+	}
+	if !strings.Contains(unattributed, "none of them attributed") {
+		t.Errorf("brief does not say the recording cannot attribute:\n%s", unattributed)
+	}
+}

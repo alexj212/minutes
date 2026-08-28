@@ -145,6 +145,31 @@ room. Such a recording now carries **no speaker labels at all** — not a warnin
 header over labels that stay, because a summariser reads the lines and can skim
 the header; it cannot skim a label that is not there.
 
+### "Not you" was read as "the far end" in four separate places
+
+Closed, and recorded because the shape recurred four times before anyone
+counted. Each site independently wrote `if speaker == You { you++ } else
+{ others++ }`, and that else-branch is the assertion *anything that is not you
+is the other party*.
+
+On the first real macOS recording — one source, so nothing could be attributed —
+it produced `0 you, 3 everyone else` in the console and `0 yours, 3 everyone
+else's` in the brief, both directly contradicting a disclosure saying the
+recording could not say who spoke. `speakerFor` had the same reflex for
+unrecognised track names, and `unattribute` rewrote the readable lines while
+leaving the withheld ones credited.
+
+Counting now happens once, in `transcript.Count`. The lesson is not that four
+authors were careless: it is that "who spoke" is a question with three answers
+and an `if/else` only has room for two, so every site that reached for one was
+structurally unable to say *unattributed* no matter how carefully it was
+written.
+
+The brief was the worst of the four and the last found. It is prose sent to the
+session that writes the notes, so a false split there has no field beside it a
+reader could check against — unlike the JSON, which at least carries
+`unattributed: true`.
+
 ### There is no honest track name for a device that records a room
 
 Raised by `minutes-mac` while scoping what an iOS recorder would need. A phone

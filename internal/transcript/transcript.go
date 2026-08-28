@@ -170,6 +170,40 @@ func speakerFor(track string) string {
 	return SpeakerUnattributed
 }
 
+// Tally is how many lines each speaker has, counted rather than inferred.
+//
+// This exists because the same mistake has now been made four times in four
+// places: `if speaker == You { you++ } else { others++ }`. That else-branch is
+// the assertion "anything that is not you is the far end", and on a recording
+// with one source it produced "0 you, 3 everyone else" — in the console, and in
+// the brief sent to the session that writes the notes — directly contradicting
+// a disclosure saying the recording could not say who spoke.
+//
+// Three call sites each decided independently and all three decided wrong, so
+// the counting is here once. A speaker this build does not recognise lands in
+// Unattributed, which is the same refusal speakerFor makes.
+type Tally struct {
+	You          int
+	Others       int
+	Unattributed int
+}
+
+// Count tallies lines by speaker.
+func Count(lines []Line) Tally {
+	var t Tally
+	for _, l := range lines {
+		switch l.Speaker {
+		case SpeakerYou:
+			t.You++
+		case SpeakerOthers:
+			t.Others++
+		default:
+			t.Unattributed++
+		}
+	}
+	return t
+}
+
 // job is one segment queued for transcription.
 type job struct {
 	track string

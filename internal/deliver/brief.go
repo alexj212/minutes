@@ -91,15 +91,6 @@ func (b Brief) Body() string {
 	m, t := b.Recording, b.Transcript
 	var s strings.Builder
 
-	you, others := 0, 0
-	for _, l := range t.Lines {
-		if l.Speaker == transcript.SpeakerYou {
-			you++
-		} else {
-			others++
-		}
-	}
-
 	fmt.Fprintf(&s, "A meeting was recorded on this machine and transcribed. It needs notes.\n\n")
 
 	fmt.Fprintf(&s, "## What happened\n\n")
@@ -107,7 +98,18 @@ func (b Brief) Body() string {
 		fmt.Fprintf(&s, "- **%s**\n", m.Name)
 	}
 	fmt.Fprintf(&s, "- Started %s, ran %s\n", m.StartedAt.Format("2006-01-02 15:04 MST"), duration(m.Duration()))
-	fmt.Fprintf(&s, "- %d lines: %d yours, %d everyone else's\n", len(t.Lines), you, others)
+	// The brief is read by a session that writes notes from it, so a false
+	// attribution split here is worse than the same mistake on a console: prose
+	// asserting "0 yours, 3 everyone else's" carries no field a reader can check
+	// it against. When the recording cannot say who spoke, say that instead.
+	if t.Unattributed {
+		fmt.Fprintf(&s, "- %d lines, **none of them attributed** — this recording captured only one "+
+			"source, so it cannot say who spoke. Do not credit anybody in the notes.\n", len(t.Lines))
+	} else {
+		c := transcript.Count(t.Lines)
+		fmt.Fprintf(&s, "- %d lines: %d yours, %d everyone else's%s\n", len(t.Lines), c.You, c.Others,
+			map[bool]string{true: fmt.Sprintf(", %d unattributed", c.Unattributed)}[c.Unattributed > 0])
+	}
 	for _, tr := range m.Tracks {
 		fmt.Fprintf(&s, "- %s track: %s, peak %.1f dBFS\n", tr.Name, tr.Device, tr.PeakDBFS())
 	}
