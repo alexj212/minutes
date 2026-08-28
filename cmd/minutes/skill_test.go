@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"regexp"
 	"strings"
@@ -127,6 +128,49 @@ func TestSkillHasFrontmatter(t *testing.T) {
 	for _, line := range strings.Split(head, "\n") {
 		if desc, ok := strings.CutPrefix(line, "description: "); ok && len(desc) < 120 {
 			t.Errorf("description is %d chars; too short to route on", len(desc))
+		}
+	}
+}
+
+// The skill must cover every flag the CLI advertises in its own usage text.
+//
+// Commands were already pinned; flags were not, so a new one could reach users
+// while the skill went on describing the tool without it. `usage()` is the
+// right boundary rather than every flag in the file: it is the curated surface,
+// and it deliberately omits the internal ones — --dir, --helper, --app-pid —
+// that only the supervisor passes to itself.
+func TestSkillDocumentsEveryAdvertisedFlag(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	skill, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := bytes.Index(source, []byte("func usage()"))
+	if start < 0 {
+		t.Fatal("usage() not found; this test reads the CLI's own advertised surface")
+	}
+	end := bytes.Index(source[start:], []byte("\n}\n"))
+	if end < 0 {
+		t.Fatal("could not find the end of usage()")
+	}
+	usage := string(source[start : start+end])
+
+	advertised := map[string]bool{}
+	for _, m := range regexp.MustCompile(`\[--([a-z-]+)`).FindAllStringSubmatch(usage, -1) {
+		advertised[m[1]] = true
+	}
+	if len(advertised) < 5 {
+		t.Fatalf("only found %d advertised flags; the pattern is probably wrong", len(advertised))
+	}
+
+	for flag := range advertised {
+		if !bytes.Contains(skill, []byte("--"+flag)) {
+			t.Errorf("usage() advertises --%s but %s never mentions it: a session driving "+
+				"this tool would not know it exists", flag, skillPath)
 		}
 	}
 }

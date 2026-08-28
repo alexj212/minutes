@@ -93,6 +93,10 @@ Prefer `start` for a real meeting. `record` holds a terminal for the length of
 the call, and anything that closes that terminal takes the recording with it —
 it is for watching the pipeline work, not for a meeting that matters.
 
+`--segment` sets the chunk length, default five minutes. Leave it alone unless
+testing: it is what bounds the damage from an interrupted recording, and shorter
+chunks mean more files rather than more safety.
+
 Whether a recording is live, without asking the tool:
 
 ```bash
@@ -165,7 +169,9 @@ no fallback that reaches the network — the failure mode of such a fallback is 
 confidential meeting uploaded on the day the GPU driver breaks.
 
 **Never set `--backend openai`, or edit `backend` in the config, unless the user
-asks for it in those words.** Which backend ran, and whether the audio left, is
+asks for it in those words.** `minutes transcribe --model <size>` overrides the
+model for one run without touching the config — `small` is the default and is
+right for meetings; `tiny` is faster and hallucinates on quiet audio. Which backend ran, and whether the audio left, is
 written into the manifest and the transcript, and `minutes list` marks such a
 meeting with `↑`. It is a question somebody may have to answer later.
 
