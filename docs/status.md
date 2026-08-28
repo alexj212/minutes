@@ -1,6 +1,7 @@
 # Where this stands
 
-Last updated 2026-08-28, after R5 — macOS capture, proven on the target Mac.
+Last updated 2026-08-28, after the first real meeting recorded on macOS —
+capture through delivery, end to end.
 
 The plan is in [CLAUDE.md](../CLAUDE.md); this is what became of it. It exists
 so that the difference between *built*, *proven*, and *assumed* stays visible,
@@ -17,7 +18,7 @@ mattered.
 | **R2** — orchestrator | **done** | Segments, manifest, `start`/`stop`/`status`/`list`, storage on disk |
 | **R3** — transcription | **done** | Per track, merged on the shared clock, local by default |
 | **R4** — summary and delivery | **done, reshaped** | Delivery to a session's inbox; summarising moved out of the worker |
-| **R5** — macOS | **done** | CoreAudio process tap through a private aggregate, same framed-stdout shape |
+| **R5** — macOS | **done** | CoreAudio process tap through a private aggregate, same framed-stdout shape. The whole pipeline runs there, not only capture |
 
 ### Two deliberate departures
 
@@ -63,6 +64,13 @@ Every number here came off the target machine. Nothing is estimated.
   the microphone while the system track held digital silence attributed every
   line correctly. This was the design's headline claim and the last thing about
   it taken on trust.
+- **The refusal to attribute.** The other half, and it took a real recording to
+  see it: a one-source recording produced three lines all marked
+  `Unattributed`, under a header explaining why, rather than crediting the room
+  to the operator. Whisper's invention over trailing silence — "Thanks for
+  watching!", a sign-off it had never heard — was withheld on a no-speech
+  probability of 0.801. Both guards fired unprompted on the first real
+  recording made on the platform.
 - **Segment rotation** across boundaries on both tracks at different rates, with
   continuous joins.
 - **Crash safety**, with `SIGKILL` mid-segment.
@@ -72,6 +80,24 @@ Every number here came off the target machine. Nothing is estimated.
   10.7 s of gap-fill and firing the re-anchor guard twice. That guard was
   written for a case that could not be reproduced deliberately, and had never
   fired against real hardware until it happened by itself. It worked.
+- **The whole pipeline on macOS**, from a real recording rather than a tone: 30
+  seconds of speech, four segments, transcribed locally in 10 s, delivered to a
+  session's inbox through the agent socket. Every stage, on the platform that
+  had only ever been proven as far as capture.
+
+  It found four bugs in twenty minutes and none had a test. Two were platform
+  defaults from when only one machine could record — the manifest hardcoded
+  `platform: "wsl/windows"`, so every Mac recording claimed to come from
+  Windows, and the transcription device defaulted to `cuda`, which no Mac has
+  and which fails only *after* the audio is safely captured. Two were speaker
+  attribution: withheld lines kept their original speaker on a recording whose
+  header said in capitals that it could not say who spoke, and the console
+  tally counted with an else-branch, printing "0 you, 3 everyone else"
+  immediately beneath that warning.
+
+  All four were visible in output nobody had read, because until this point
+  nothing had produced output on that machine worth reading. That is the
+  argument for recording one rather than testing with tones.
 
 ## Still taken on trust
 
