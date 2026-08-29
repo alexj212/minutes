@@ -60,7 +60,7 @@ over=$(printf '%s\n' "$rows" | while IFS= read -r line; do
 	text=${line#- }
 	r=$(printf '%s' "$text" | wc -m)
 	if [ "$r" -gt 120 ]; then echo x; fi
-	case "$text" in *:\ *) ;; *) echo x ;; esac
+	case "$text" in (*:\ *) ;; (*) echo x ;; esac
 done | wc -l)
 [ "$over" -gt 0 ] && fail=1
 
