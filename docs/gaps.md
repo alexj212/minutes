@@ -485,11 +485,23 @@ proven — see below — and what it exposed is listed as a gap of its own.*
   them — `manifest.Platform` hardcoded `wsl/windows`, and a `cuda` device
   default no Mac can satisfy, which fails *after* a meeting is captured. Still
   one Windows host, one Mac, and no Linux desktop.
-- **A faster device on macOS.** `torch.backends.mps.is_available()` is true on
-  the Mac and the default there is `cpu`, which transcribed 30 s of audio in
-  11 s. openai-whisper's MPS support has historically been unreliable, so this
-  is listed rather than defaulted: it needs measuring before it is believed,
-  which is the same rule the rest of this file follows.
+- ~~**A faster device on macOS.**~~ **Measured, and the answer is no.**
+  `torch.backends.mps.is_available()` is true on the Mac, so `--device mps`
+  looks available and runs. It does not work: the decoder's logits come back
+  all `-inf` on one run and all `nan` on the next, and whisper dies
+  constructing a distribution from them. **No transcript is written at all.**
+
+  The reason this is worth a paragraph rather than a line is how it presents.
+  Wall-clock for the failing run was **43.8 s against 49.9 s on `cpu`** for the
+  same 120 s of speech — so a comparison that timed the two and stopped there
+  would have reported MPS as 12% faster and adopted it. The output is the only
+  thing that distinguishes a fast device from a broken one, and the timing says
+  the wrong thing confidently.
+
+  That is the whole argument for asserting two cases must *differ in time and
+  not differ in text*: either half alone proves nothing, and here the half most
+  people would measure points the wrong way. `cpu` stays the default on darwin,
+  and this is measured rather than assumed.
 - ~~**That a message to a session which is not running is delivered when it
   starts.**~~ **Answered, and it was false.** The line was never
   running-or-not. A project the coordinator has *seen* — in its node's
