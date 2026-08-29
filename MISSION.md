@@ -1,5 +1,6 @@
 # Records both sides of a desktop meeting, transcribes it, and hands a session the material to write notes from.
 status: active
+owner: minutes-mac
 updated: 2026-08-29
 
 ## Now

@@ -25,6 +25,18 @@ active|blocked|paused|done) ;;
 *)  say "status \"$status\" is not one of active, blocked, paused, done — anything else is dropped" ;;
 esac
 
+# owner: names the session that writes this file, for a project whose checkouts
+# span machines. Absent means nobody declared it, which is not the same as this
+# node owning it — on a single-machine project absence is normal.
+#
+# Checked here only for shape. Whether an owner is *needed* depends on how many
+# checkouts exist, and the dashboard is the only place both are visible at once.
+owner=$(sed -n 's/^owner: *//p' "$F" | head -1)
+case "$owner" in
+"") ;;
+*[!a-zA-Z0-9._-]*) say "owner \"$owner\" is not a session name — it is the value a dashboard groups by" ;;
+esac
+
 rows=$(sed -n '/^## Waiting on/,/^## /p' "$F" | grep '^- ' || true)
 n=$(printf '%s\n' "$rows" | grep -c '^- ' || true)
 [ "$n" -gt 6 ] && say "$n Waiting on rows; the parser keeps 6 and drops the rest silently"
