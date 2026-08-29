@@ -509,10 +509,19 @@ not survive, and every suppressed line is kept with the reason it went.
 
 What is left:
 
-1. **A desktop indicator on Windows**, where the meeting actually happens. The
-   marker file and the notification help; neither is on screen.
-2. **A level check before recording, not after.** A muted microphone is worth
-   catching in preflight rather than in the transcript.
+1. **A live check that each track is still producing audio.** Promoted to the
+   top by evidence rather than argument: on 2026-08-27 the microphone delivered
+   zero frames for forty-four minutes, and the first thing that noticed was a
+   human reading a manifest two days later. The disclosure now added is a
+   consolation prize — it tells you afterwards that the meeting is half
+   recorded. The supervisor already sees the frame counts as they arrive, and
+   a track at zero after the first thirty seconds is not a judgment call.
+   Preflight would not have caught this one either: the device opened fine and
+   reported its name and sample rate. **The check has to run during, not
+   before.**
+2. **A desktop indicator on Windows**, where the meeting actually happens. The
+   marker file and the notification help; neither is on screen. Item 1 gives it
+   something worth showing.
 3. **`minutes config`.** Hand-written JSON, no validation, and now with rather
    more in it.
 4. **Background room audio during a meeting.** `--app` removes what the machine
