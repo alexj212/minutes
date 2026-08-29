@@ -15,7 +15,7 @@ by a peer or by real audio rather than by the test suite.
 - you: 5.2 GB here and 224 MB there, recordings of you and your home · no retention has ever run · one command
 - you: devops half-meeting · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
-- nobody: macOS recording indicator · the consent dialog names the launcher, so nothing discloses · NSStatusBar + signing
+- nobody: macOS recording indicator · the consent dialog names the launcher, not us · NSStatusBar + signing
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
