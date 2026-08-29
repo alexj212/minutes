@@ -48,3 +48,18 @@ if errorlevel 1 (echo ERROR: compile failed & exit /b 1)
 
 del "%OUTDIR%\capture.obj" 2>nul
 echo Built %OUTDIR%\minutes-capture.exe
+
+rem The tray indicator is a second binary on purpose: a GUI message loop beside
+rem two real-time audio threads is a way to drop packets for a reason nobody
+rem will find, and the tray dying must not take the recording with it.
+set "TSRC=%~dp0tray.cpp"
+cl.exe /nologo /EHsc /O2 /W3 /MT /std:c++17 ^
+  /D_CRT_SECURE_NO_WARNINGS ^
+  "%TSRC%" ^
+  /Fe:"%OUTDIR%\minutes-tray.exe" ^
+  /Fo:"%OUTDIR%\\" ^
+  /link shell32.lib user32.lib gdi32.lib
+if errorlevel 1 (echo ERROR: tray compile failed & exit /b 1)
+
+del "%OUTDIR%\tray.obj" 2>nul
+echo Built %OUTDIR%\minutes-tray.exe

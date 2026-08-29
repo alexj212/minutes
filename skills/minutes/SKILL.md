@@ -112,6 +112,21 @@ Whether a recording is live, without asking the tool:
 [ -f ~/.config/minutes/recording ] && echo "● REC"
 ```
 
+### The tray icon
+
+On Windows a red dot appears in the tray for the length of the recording. Right
+click it for the meeting's name, how long it has been going, **Stop recording**
+and **Open folder**.
+
+Stopping from the tray is the same as `minutes stop` — it asks the orchestrator,
+which finishes the manifest and queues transcription the usual way. It is not a
+kill.
+
+**It is disclosure, not control.** The point is that somebody in the room can
+see a recording is happening without being told. If it fails to start, the
+recording continues and says so; do not treat that as a reason to stop, and do
+not suggest disabling it.
+
 ## Delivering — this is a judgment call, and not the tool's
 
 A recording bound for **this machine's own core session** is delivered

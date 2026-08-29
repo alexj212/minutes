@@ -26,6 +26,7 @@ import (
 	"github.com/alexj/minutes/internal/capture"
 	"github.com/alexj/minutes/internal/config"
 	"github.com/alexj/minutes/internal/deliver"
+	"github.com/alexj/minutes/internal/indicator"
 	"github.com/alexj/minutes/internal/manifest"
 	"github.com/alexj/minutes/internal/preflight"
 	"github.com/alexj/minutes/internal/session"
@@ -363,6 +364,17 @@ func describeVersion() Version {
 		hc.Degraded = helperDegraded(helper)
 	}
 	v.Components = append(v.Components, hc)
+
+	// The tray is part of the set but is not required to record, so its absence
+	// is reported without making the set incomplete. `present: false` means
+	// "this release landed half-way" and would refuse a publish; a machine that
+	// simply has no tray helper is not a broken release.
+	if tray := indicator.FindHelper(helper); tray != "" {
+		v.Components = append(v.Components, Component{
+			Name: filepath.Base(tray), Platform: helperPlatform(tray),
+			Path: tray, Present: true,
+		})
+	}
 	return v
 }
 
@@ -514,6 +526,32 @@ func noAudio(m *manifest.Manifest, track string, since time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = deliver.New().Notify(ctx, "Recording is missing a track", body, "minutes")
+}
+
+// showIndicator puts the recording in the tray, and says so if it cannot.
+//
+// Failure is reported and not fatal. A recording whose indicator did not draw
+// is still a recording, and refusing to record because a tray icon would not
+// appear would be protecting the wrong thing.
+func showIndicator(ctx context.Context, m *manifest.Manifest, helper string,
+	log func(string, ...any), onStop func()) *indicator.Indicator {
+	tray := indicator.FindHelper(helper)
+	if tray == "" {
+		return nil
+	}
+	name := m.Name
+	if name == "" {
+		name = m.ID
+	}
+	ind, err := indicator.Start(ctx, indicator.Options{
+		Helper: tray, Name: name, Dir: m.Dir(), OnStop: onStop, Log: log,
+	})
+	if err != nil {
+		log("the tray indicator did not start (%v) — recording anyway, "+
+			"but nothing on screen will show that this is happening", err)
+		return nil
+	}
+	return ind
 }
 
 func announce(m *manifest.Manifest) {
@@ -977,9 +1015,15 @@ func cmdRecord(args []string) int {
 	}
 	fmt.Printf("  files: %s\n\n", dir)
 
-	runErr := capture.Run(ctx, capture.Options{
+	log := func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
+	recCtx, endRecording := context.WithCancel(ctx)
+	defer endRecording()
+	ind := showIndicator(recCtx, m, helper, log, endRecording)
+	defer ind.Stop()
+
+	runErr := capture.Run(recCtx, capture.Options{
 		Helper: helper, Manifest: m, Duration: *dur, AppPID: target.PID,
-		Log:       func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) },
+		Log:       log,
 		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
 	})
 	if err := m.Finish(runErr); err != nil {
@@ -1320,9 +1364,19 @@ func cmdSupervise(args []string) int {
 
 	fmt.Printf("supervising %s\n", m.ID)
 	announce(m)
-	runErr := capture.Run(ctx, capture.Options{
+	log := func(f string, a ...any) { fmt.Printf(f+"\n", a...) }
+	recCtx, endRecording := context.WithCancel(ctx)
+	defer endRecording()
+	// Stopping from the tray cancels the recording context, which is exactly
+	// what `minutes stop` and a Ctrl-C already do — one path to ending a
+	// recording rather than three, so the manifest is finished and the
+	// transcript queued the same way however it was asked for.
+	ind := showIndicator(recCtx, m, *helper, log, endRecording)
+	defer ind.Stop()
+
+	runErr := capture.Run(recCtx, capture.Options{
 		Helper: *helper, Manifest: m, AppPID: *appPID,
-		Log:       func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
+		Log:       log,
 		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
 	})
 	// Capture has ended, whatever happens next. The marker must go now rather

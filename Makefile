@@ -79,6 +79,8 @@ install: build helper
 	@mkdir -p $(PREFIX)
 	install -m 0755 $(BIN) $(PREFIX)/minutes
 	@install -m 0755 $(HELPER) $(PREFIX)/$(notdir $(HELPER))
+	@if [ -f dist/minutes-tray.exe ]; then install -m 0755 dist/minutes-tray.exe $(PREFIX)/minutes-tray.exe; fi
+	@if [ -f dist/minutes-tray ]; then install -m 0755 dist/minutes-tray $(PREFIX)/minutes-tray; fi
 	@echo "installed to $(PREFIX)"
 	@command -v minutes >/dev/null 2>&1 || echo "note: $(PREFIX) is not on PATH"
 	@echo "built from $$(git rev-parse --short HEAD 2>/dev/null || echo 'unknown')"
@@ -97,6 +99,8 @@ dist: build helper
 	@rm -rf dist/release && mkdir -p dist/release
 	@cp $(BIN) dist/release/
 	@cp $(HELPER) dist/release/
+	@if [ -f dist/minutes-tray.exe ]; then cp dist/minutes-tray.exe dist/release/; fi
+	@if [ -f dist/minutes-tray ]; then cp dist/minutes-tray dist/release/; fi
 	@$(BIN) version --json > dist/release/version.json
 	@echo "release set for $$($(BIN) version --json | grep '"platform"' | head -1 | cut -d'"' -f4):"
 	@ls -1 dist/release | sed 's/^/  /'
@@ -117,6 +121,7 @@ publish: dist
 
 uninstall:
 	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture $(PREFIX)/minutes-capture.exe
+	rm -f $(PREFIX)/minutes-tray $(PREFIX)/minutes-tray.exe
 
 clean:
 	rm -f $(BIN) $(HELPER) dist/*.obj

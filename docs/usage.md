@@ -345,6 +345,30 @@ It notifies rather than writing to the log, because the log is a file. On
 exactly that into `recorder.log`, the transcript was delivered with one side of
 the conversation missing, and nobody read the line for two days.
 
+### The tray icon
+
+On Windows a red dot sits in the tray for as long as the recording runs. Right
+click it:
+
+    2026-08-29 standup          (the meeting)
+    recording — 12m04s          (updates every second)
+    ─────────────────────────
+    Stop recording
+    Open folder
+
+**Stop recording asks; it does not kill.** The tray writes one line to the
+orchestrator, which ends the recording exactly the way `minutes stop` and a
+Ctrl-C do — one path to ending a recording rather than three, so the manifest is
+finished and the transcript queued the same way however it was asked for. The
+icon stays until the recording has actually stopped, because until then it still
+is recording.
+
+It is a separate binary from the capture helper. A GUI message loop beside two
+real-time audio threads is a way to drop packets for a reason nobody will find,
+and the tray dying must not take the recording with it. If it cannot start, the
+recording goes ahead and says so — refusing to record because an icon would not
+draw protects the wrong thing.
+
 ## Transcribing
 
 ```

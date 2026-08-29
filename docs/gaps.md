@@ -326,7 +326,7 @@ process discovery, and because naming the wrong process records silence. `--app`
 refuses a name that matches nothing or matches two things, rather than quietly
 widening.
 
-### ~~An active recording is only obvious where it was started~~ — fixed
+### ~~An active recording is only obvious where it was started~~ — fixed, and now on screen
 
 `start` prints a banner, but then returns. After that, the only way to know this
 machine is recording is to run `minutes list`. There is no tray icon, no
@@ -581,9 +581,11 @@ What is left:
    notification naming the track, while the meeting is still happening and
    somebody can still fix it. It notifies rather than logs, because the log is
    where the helper's own report of this sat unread for two days.
-2. **A desktop indicator on Windows**, where the meeting actually happens. The
-   marker file and the notifications help; neither is on screen. Item 1 gave it
-   something worth showing.
+2. ~~**A desktop indicator on Windows**, where the meeting actually happens.~~
+   **Done.** A red dot in the tray for the length of the recording, with the
+   meeting's name, a running elapsed time, **Stop recording** and **Open
+   folder**. Stopping asks the orchestrator rather than killing anything, so
+   there is still one path to ending a recording rather than three.
 3. ~~**`minutes config`.**~~ **Done.** `minutes config` shows what is in effect
    and says when there is no file; `minutes config set KEY VALUE` validates
    before writing and refuses an unknown key with near-misses. Hand-edited JSON
@@ -594,8 +596,10 @@ What is left:
 5. **The macOS consent dialog names the responsible process, not the
    recorder.** The one moment the OS tells a human "this program wants to
    record you", it names whatever launched the helper. That makes an
-   out-of-band indicator carry the disclosure, which is an argument for item 1
-   rather than against it.
+   out-of-band indicator carry the disclosure, which is an argument for the
+   indicator rather than against it. **That indicator now exists on Windows**,
+   which is where the meetings happen; the macOS half is the open question,
+   because that is the platform where the dialog names the wrong program.
 
    Now measured rather than guessed at, and it is not a launch-shape problem.
    Across 24 attribution checks — the helper run directly, run under `setsid`
