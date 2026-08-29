@@ -15,7 +15,7 @@ CMDEXE  := /c/Windows/System32/cmd.exe
 # the Mac, which is why it is the default rather than /usr/local/bin.
 PREFIX ?= $(HOME)/bin
 
-.PHONY: all build helper test vet clean install uninstall dist preflight record
+.PHONY: all build helper test vet clean install uninstall dist publish preflight record
 
 all: build helper
 
@@ -101,6 +101,19 @@ dist: build helper
 	@echo "release set for $$($(BIN) version --json | grep '"platform"' | head -1 | cut -d'"' -f4):"
 	@ls -1 dist/release | sed 's/^/  /'
 	@echo "  (built here; the other platform's set must be built on that machine)"
+
+# Publishing is the tool's call, not the coordinator's, because only the tool
+# knows whether it has built a whole set. Half a set is worse than no set: it
+# installs, it starts, and it fails at the moment somebody tries to record.
+# So this refuses locally and names what is missing, rather than letting the
+# coordinator refuse from a distance.
+#
+# Only ever publishes the platform it was built on. No host can build every
+# set — a Windows helper needs MSVC, a darwin helper needs Xcode and a signing
+# identity — so each machine publishes its own and the coordinator merges them.
+publish: dist
+	@sh scripts/publish-guard.sh $(BIN)
+	shabadoo publish --tool minutes dist/release
 
 uninstall:
 	rm -f $(PREFIX)/minutes $(PREFIX)/minutes-capture $(PREFIX)/minutes-capture.exe

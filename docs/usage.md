@@ -496,6 +496,33 @@ Useful manifest fields:
 
 ---
 
+## Installing it on the other machines
+
+`minutes` is distributed through shabadoo, so a node gets it the same way it
+gets anything else:
+
+    make publish              # from a machine that has built a complete set
+    shabadoo upgrade --tool minutes --all
+
+**A release is a set, and only the machine that built it can publish it.** On
+this host that is the Linux orchestrator plus the Windows helper it drives over
+interop; on the Mac it is the Linux-equivalent orchestrator plus the CoreAudio
+helper, which needs Xcode and a signing identity. **No host can build both**, so
+each publishes its own and the coordinator merges them. A node with no set for
+its platform is skipped rather than failed — that is not the same as being
+behind, and telling it otherwise would have it either install nothing forever or
+chase a version that cannot exist for it.
+
+`make publish` refuses two things before it uploads, because only this tool
+knows what a complete copy of itself looks like:
+
+- **A dirty tree.** The stamp would read `-dirty`, which names no commit, so a
+  node running it could not be told what it is running. `ALLOW_DIRTY=1`
+  overrides it and says so on the way past.
+- **An incomplete set.** A set missing its helper installs fine, starts fine,
+  and fails at the moment somebody tries to record. That is the worst time to
+  discover it, so it is caught here instead.
+
 ## When something is wrong
 
 **"Refusing to record: …"** — a pre-start check found a problem and named it:
