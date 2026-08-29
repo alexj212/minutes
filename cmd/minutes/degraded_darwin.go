@@ -59,8 +59,8 @@ func helperDegraded(path string) string {
 		// An unsigned binary is a definite answer, not an unknown one: it is
 		// the worst case, and saying so is more use than saying nothing.
 		if strings.Contains(text, "not signed at all") {
-			return "not signed: macOS will ask for audio-recording permission on the " +
-				"machine that installs it, and again every time it is rebuilt"
+			return "not signed at all: nothing identifies this binary to whoever " +
+				"receives it, and a Mac that downloads it may refuse to run it"
 		}
 		return "could not determine the signature: " + firstLine(text)
 	}
@@ -76,16 +76,34 @@ func helperDegraded(path string) string {
 		return "could not determine the signature: codesign reported no designated requirement"
 	}
 
-	// A requirement naming an identifier, an anchor or a certificate is tied to
-	// something that survives a rebuild. One that is only a cdhash is tied to
-	// these exact bytes and nothing else.
+	// A requirement naming an identifier, an anchor or a certificate names an
+	// author. One that is only a cdhash names nothing but the bytes.
+	//
+	// These strings used to say an ad-hoc helper would make macOS ask for
+	// recording permission on the installing machine and after every rebuild.
+	// That was wrong, and it was wrong in the worst place: this text is carried
+	// by shabadoo to a stranger at install time, where nobody can check it.
+	//
+	// Measured directly on the target Mac, same session, same responsible
+	// process, back to back: a properly signed helper and an ad-hoc one both
+	// cost zero prompts. TCC keys the grant on the RESPONSIBLE process — the
+	// launcher — and the helper is only ever the accessing process. The earlier
+	// belief came from a before-and-after window in which the launcher itself
+	// was being rebuilt several times a day, and the variable that moved was
+	// never the helper.
+	//
+	// So what signing actually buys, and what these strings now say: an
+	// identity a recipient can resolve, integrity that is checkable because it
+	// is signed, and not being stopped by Gatekeeper on a Mac that downloaded
+	// the file. A durable consent grant belongs to the launcher, which is not
+	// this project's binary.
 	if strings.Contains(designated, "anchor ") || strings.Contains(designated, "certificate ") {
 		return ""
 	}
 	if strings.Contains(designated, "cdhash") {
-		return "ad-hoc signed: its designated requirement is a hash of these exact bytes, " +
-			"so macOS will ask for audio-recording permission on the machine that " +
-			"installs it, and again after every rebuild"
+		return "ad-hoc signed: its designated requirement is a bare hash of these " +
+			"bytes, so it names no author a recipient can resolve and Gatekeeper " +
+			"may refuse it on a Mac that downloaded it"
 	}
 	return "could not determine the signature: unrecognised designated requirement " + designated
 }

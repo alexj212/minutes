@@ -57,11 +57,15 @@ mkdir -p "$root/dist"
 # the name identifying the recorder has to be one a stranger can resolve. The
 # old one named a private host nobody outside this machine could look up.
 #
-# Permanent because the designated requirement names it, so changing it makes
-# TCC treat the binary as a new subject and revokes every existing grant,
-# exactly the way an ad-hoc rebuild does. Renamed on 2026-08-29 at a cost of one
-# consent prompt on one machine, which is the only moment it was ever going to
-# be that cheap. Do not change it again.
+# Renamed on 2026-08-29. The rename was predicted to cost one consent prompt and
+# measured to cost none — TCC keys its grant on the responsible process, which
+# is the launcher, so the helper's identifier does not gate consent at all. The
+# urgency argument for renaming was wrong; the reason above was not, and should
+# have carried it alone.
+#
+# Keep it stable anyway, for a smaller reason than the one first written here: it
+# is the name a person reads in System Settings, and a name that moves is a name
+# that tells them nothing.
 identifier="com.github.alexj212.minutes-capture"
 
 identity="${MINUTES_CODESIGN_IDENTITY:-}"

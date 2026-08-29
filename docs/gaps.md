@@ -204,6 +204,27 @@ its own banner above the withheld notice and its own line in the brief — becau
 wrong**. What is wrong is that half the conversation is missing, and correct
 labels on half a meeting look exactly like a complete one.
 
+### ~~The `degraded` string told a stranger something untrue~~ — corrected
+
+The reason an ad-hoc helper was called degraded was that macOS would ask for
+recording permission on the installing machine and after every rebuild.
+**Measured false**: a properly signed helper and an ad-hoc one both cost zero
+prompts, same session, same responsible process, back to back. TCC keys the
+grant on the responsible process — the launcher — and the helper is only ever
+the accessing process.
+
+The place it was wrong is what makes it worth a section. That string is carried
+by shabadoo's distribution and shown to whoever installs the set, which is
+somebody with no way to check it and no reason to doubt it. A confident sentence
+in a place nobody can verify is the same failure as a fabricated transcript
+line, and this project spent a week building disclosure machinery on exactly
+that argument.
+
+It now says what signing actually buys: an identity a recipient can resolve,
+integrity that is checkable because it is signed, and not being stopped by
+Gatekeeper on a Mac that downloaded the file. A durable consent grant belongs to
+the launcher, which is not this project's binary.
+
 ### There is no honest track name for a device that records a room
 
 Raised by `minutes-mac` while scoping what an iOS recorder would need. A phone
@@ -599,15 +620,22 @@ Privacy & Security and what anybody inspecting the binary reads. A project
 arguing that an active recording should be obvious rather than quiet cannot
 identify its recorder with a private hostname a stranger cannot resolve.
 
-**And it was only ever going to be this cheap once.** The bill today was one
-consent prompt on one machine. Left alone it becomes one prompt for every
-machine that had ever granted it, at whatever future moment somebody decides the
-name matters — and the tray makes distribution to other Macs plausible, which is
-what started that clock. One now against N later, with N only going up.
+**The second argument was "one prompt now against N later", and it was wrong.**
+Recorded because it is the more useful half. The rename was predicted to cost one
+consent prompt and measured to cost none: TCC keys its grant on the *responsible*
+process — the launcher — so the helper's identifier does not gate consent at all,
+and there was no N. The number was what made the change feel urgent rather than
+tidy, and the number was imaginary.
+
+Nothing was spent on it, because the first argument was sufficient and the change
+is still right. But it is the second time a correlation on that machine has been
+written down as a cause, and the pattern is worth more than either instance.
 
 Now `com.github.alexj212.minutes-capture`, matching shabadoo's convention
-because the two sit in the same consent chain and somebody reading System
-Settings should be able to see they are related. **Do not change it again.**
+because somebody reading System Settings should be able to see the two are
+related. Keep it stable — not because moving it revokes anything, which is the
+claim that turned out false, but because it is the name a person reads and a
+name that moves tells them nothing.
 
 ## What to fix next
 
