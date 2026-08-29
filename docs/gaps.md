@@ -530,8 +530,6 @@ What is left:
    before writing and refuses an unknown key with near-misses. Hand-edited JSON
    silently ignored a mistyped key — the value sat in the file looking set while
    the default ran, which is the worst shape a settings file has.
-4. **placeholder.** Hand-written JSON, no validation, and now with rather
-   more in it.
 4. **Background room audio during a meeting.** `--app` removes what the machine
    plays; it cannot remove what the room says while the far end is talking.
 5. **The macOS consent dialog names the responsible process, not the
