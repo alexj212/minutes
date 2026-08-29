@@ -52,7 +52,7 @@ func signingIdentity(t *testing.T) string {
 // its own — which is the same blindness that let an else-branch credit the far
 // end in four separate places.
 func TestSignedAndAdHocHelpersAreDistinguished(t *testing.T) {
-	adhoc := signAs(t, "--force", "--sign", "-", "--identifier", "io.dumpr.test")
+	adhoc := signAs(t, "--force", "--sign", "-", "--identifier", "com.github.alexj212.minutes-test")
 	gotAdhoc := helperDegraded(adhoc)
 	if gotAdhoc == "" {
 		t.Error("an ad-hoc signed helper reported no degradation; its grant will not " +
@@ -67,7 +67,7 @@ func TestSignedAndAdHocHelpersAreDistinguished(t *testing.T) {
 		t.Skip("no codesigning identity on this machine — the pair cannot be formed, " +
 			"and the ad-hoc half alone does not prove the function can say yes")
 	}
-	signed := signAs(t, "--force", "--sign", id, "--identifier", "io.dumpr.test")
+	signed := signAs(t, "--force", "--sign", id, "--identifier", "com.github.alexj212.minutes-test")
 	gotSigned := helperDegraded(signed)
 	if gotSigned != "" {
 		t.Errorf("a properly signed helper reported degraded %q, want empty", gotSigned)

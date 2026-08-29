@@ -205,7 +205,7 @@ Measured rather than assumed, and it is not a launch-shape problem: across 24
 attribution checks — run directly, run under `setsid`, and spawned by the
 orchestrator — TCC named the launcher every time. Signing did not change who
 is held responsible, only what is known about the accessor, which now records
-as `io.dumpr.minutes-capture`. The system can name the recorder and reports
+as `com.github.alexj212.minutes-capture`. The system can name the recorder and reports
 the launcher anyway.
 
 `responsibility_spawnattrs_setdisclaim` would fix it, but it is a
@@ -230,7 +230,7 @@ Measured: consent granted, helper rebuilt, asked again.
 Signing with a real identity replaces that requirement with one naming the
 identifier and the certificate:
 
-    designated => identifier "io.dumpr.minutes-capture"
+    designated => identifier "com.github.alexj212.minutes-capture"
          and anchor apple generic
          and certificate leaf[subject.CN] = "Apple Development: ..."
 

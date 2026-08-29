@@ -585,6 +585,30 @@ commits behind despite `make install` having run in the same command as the
 commit. The root cause is not pinned — a re-run installed correctly — which is
 precisely the argument for a check rather than a habit.
 
+### ~~The macOS bundle identifier named a private host~~ — renamed while it was cheap
+
+`io.dumpr.minutes-capture` was chosen without knowing that the designated
+requirement names it, so changing it makes TCC treat the binary as a new subject
+and revokes every existing grant — exactly the way an ad-hoc rebuild does.
+shabadoo hit the same thing and had to rename for an unrelated reason.
+
+Two arguments, and the second is the one that made it urgent.
+
+**The identifier is user-facing.** It is what System Settings shows under
+Privacy & Security and what anybody inspecting the binary reads. A project
+arguing that an active recording should be obvious rather than quiet cannot
+identify its recorder with a private hostname a stranger cannot resolve.
+
+**And it was only ever going to be this cheap once.** The bill today was one
+consent prompt on one machine. Left alone it becomes one prompt for every
+machine that had ever granted it, at whatever future moment somebody decides the
+name matters — and the tray makes distribution to other Macs plausible, which is
+what started that clock. One now against N later, with N only going up.
+
+Now `com.github.alexj212.minutes-capture`, matching shabadoo's convention
+because the two sit in the same consent chain and somebody reading System
+Settings should be able to see they are related. **Do not change it again.**
+
 ## What to fix next
 
 The three highest items are done: one application can be captured instead of the
@@ -624,7 +648,7 @@ What is left:
    runs — TCC named `shabadoo` every single time. Responsibility is inherited
    through the process ancestry and is not broken by a new session or process
    group. Signing did not change it either, though it did make the helper
-   identifiable: TCC now records `identifier=io.dumpr.minutes-capture` as the
+   identifiable: TCC now records `identifier=com.github.alexj212.minutes-capture` as the
    accessing process while still holding the launcher responsible. It knows
    what the recorder is and reports the other name anyway.
 

@@ -49,6 +49,21 @@ mkdir -p "$root/dist"
 # The identity is discovered rather than hardcoded, because this repo is shared
 # with machines that do not have one. Falling back to ad-hoc keeps the build
 # working there; it just does not get a durable grant.
+# The identifier is user-facing and permanent, in that order of importance.
+#
+# It is the string System Settings shows under Privacy & Security, and the one
+# in the designated requirement anybody inspecting the binary reads. On a
+# project arguing that an active recording should be obvious rather than quiet,
+# the name identifying the recorder has to be one a stranger can resolve. The
+# old one named a private host nobody outside this machine could look up.
+#
+# Permanent because the designated requirement names it, so changing it makes
+# TCC treat the binary as a new subject and revokes every existing grant,
+# exactly the way an ad-hoc rebuild does. Renamed on 2026-08-29 at a cost of one
+# consent prompt on one machine, which is the only moment it was ever going to
+# be that cheap. Do not change it again.
+identifier="com.github.alexj212.minutes-capture"
+
 identity="${MINUTES_CODESIGN_IDENTITY:-}"
 if [ -z "$identity" ]; then
     identity="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null \
@@ -57,14 +72,14 @@ fi
 
 if [ -n "$identity" ]; then
     /usr/bin/codesign --force --sign "$identity" \
-        --identifier "io.dumpr.minutes-capture" \
+        --identifier "$identifier" \
         --options runtime \
         --timestamp=none \
         "$out"
     echo "signed with $identity"
 else
     /usr/bin/codesign --force --sign - \
-        --identifier "io.dumpr.minutes-capture" \
+        --identifier "$identifier" \
         "$out"
     echo "signed ad-hoc: no codesigning identity found, so macOS will ask for" >&2
     echo "audio permission again after every rebuild." >&2
