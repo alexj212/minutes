@@ -318,13 +318,15 @@ actually happens.
 
 ## 2. Will annoy you
 
-### The first transcription silently downloads a model
+### ~~The first transcription silently downloads a model~~ — fixed
 
 `small` is 244 MB, `large-v3` is 1.5 GB. The first run with a given model
 fetches it with no warning and no progress, so it looks like a hang. Pull the
 model before the meeting.
 
-**Fix:** check for the model and say what is about to happen.
+**Fixed.** The first run with an uncached model says what is being fetched and
+roughly how big it is. Silent otherwise, because a warning on every run is one
+nobody reads.
 
 ### There is no `minutes config`
 
@@ -376,23 +378,27 @@ track, which the recorder can measure rather than infer from text.
 
 **Headphones remove the problem entirely.** They remain the right answer.
 
-### Thresholds are fixed, and two of them can drop real speech
+### Thresholds are fixed, and one of them can still drop real speech
 
-- **Silence floor, −60 dBFS.** Segments quieter than this are never transcribed.
-  A very quiet participant on a bad connection could fall below it and vanish
-  with no indication in the transcript.
+- ~~**Silence floor, −60 dBFS.**~~ **Disclosed.** Segments quieter than this are
+  never sent to the model, so they produce no line *and no withheld line* —
+  the stretch is simply absent, and nothing could tell a missing part of a
+  meeting from a quiet one. The count now reaches `transcript.json` and the
+  header rather than only the log. Measured across 106 segments of real
+  meetings it has never fired once, which is what makes it worth reading when
+  it does.
 - **Echo suppression, 0.6 word containment within 2 seconds.** A short genuine
   agreement that repeats the other side — "yes, Thursday" right after somebody
   says "Thursday" — matches the echo test and is dropped from your track. The
-  count is reported, but not which lines.
+  line is kept in `Withheld` with its reason, so it is recoverable; what is not
+  recoverable is knowing it was yours.
 
-Neither is configurable, and the dropped lines are not recoverable from the
-transcript.
-
-**Fix:** make both thresholds configurable, and record dropped lines in
-`transcript.json` rather than only counting them. The level pass makes this
-worse in one way — there are now two ways for a line to disappear, and neither
-leaves a trace beyond a count.
+**Not fixed by making them configurable, which is what this entry used to say.**
+A knob requires guessing the right value before the meeting, and somebody who
+knew to do that would not have had the problem. Disclosure is the better answer
+in every case here: it tells the person afterwards that something went, which is
+when they can actually judge whether it mattered. The one remaining case is
+already disclosed as a count; what it lacks is attribution, not a setting.
 
 ---
 

@@ -125,6 +125,21 @@ type Transcript struct {
 	// is published as the operator. Real words, wrong mouth, and the operator's
 	// is the worst one to get wrong.
 	AttributionUnreliable string `json:"attributionUnreliable,omitempty"`
+	// SilentSegments counts whole segments never sent to the model because
+	// their peak was below the silence floor.
+	//
+	// Different from a withheld line, and it has to be counted separately: a
+	// withheld line was transcribed and then set aside with a reason attached,
+	// and this is audio that was never looked at. Nothing downstream can tell
+	// that a stretch of the meeting is missing rather than quiet.
+	//
+	// It went to the log until now, which for a supervised recording is a file.
+	// That is the same place the helper's report of a dead microphone sat unread
+	// for two days.
+	//
+	// Measured across 106 segments of real meetings: zero. So this is silent in
+	// the ordinary case and worth reading when it is not.
+	SilentSegments int `json:"silentSegments,omitempty"`
 	// MicrophoneLost records that the operator's own track captured nothing.
 	//
 	// Distinct from every other disclosure here, which is about labels being
@@ -303,6 +318,9 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 		AudioLeftMachine: t.SendsAudioOffMachine(),
 		Recorded:         m.Recorded,
 	}
+	// Counted where the segments were read and recorded here, because it has to
+	// survive into the file: the log is not a place anybody looks afterwards.
+	out.SilentSegments = skipped
 	// A model can report an end past the end of the audio. Left alone that
 	// stamps a line as running beyond the recording — observed: 12.06s on a
 	// 9.98s file — which makes a transcript disagree with its own manifest.
@@ -627,6 +645,11 @@ func (t *Transcript) Text() string {
 		fmt.Fprintf(&b, "# %d line(s) were withheld — echoes of the far end, or spans the model\n"+
 			"# said were not speech. They are in %s with the reason for each.\n\n",
 			len(t.Withheld), JSONName)
+	}
+	if t.SilentSegments > 0 {
+		fmt.Fprintf(&b, "# %d segment(s) were never transcribed: their peak was below %d dBFS,\n"+
+			"# which is quieter than a room. That part of the meeting is not below.\n\n",
+			t.SilentSegments, silenceFloorDBFS)
 	}
 	if len(t.FarEndSilent) > 0 {
 		fmt.Fprintf(&b, "# %d stretch(es) below are marked: the other side was silent, so what\n"+

@@ -861,3 +861,29 @@ func TestAMissingMicrophoneIsDisclosed(t *testing.T) {
 		t.Errorf("a complete recording claims something is missing:\n%s", present.Text())
 	}
 }
+
+// A segment below the silence floor is never sent to the model, so it produces
+// no line and no withheld line either — it is simply absent, and nothing
+// downstream can tell a missing stretch of meeting from a quiet one.
+//
+// It was reported only in the log, which for a supervised recording is a file:
+// the same place the helper's report of a dead microphone sat unread for two
+// days.
+//
+// Asserted as a pair. A transcript with skipped segments and one without must
+// read differently, or the notice is either always there or never there and
+// both look the same from one example.
+func TestSkippedSilentSegmentsAreDisclosed(t *testing.T) {
+	quiet := &Transcript{RecordingID: "r", Backend: "b", Recorded: true, SilentSegments: 3}
+	full := &Transcript{RecordingID: "r", Backend: "b", Recorded: true}
+
+	if quiet.Text() == full.Text() {
+		t.Fatal("a transcript missing whole segments reads identically to a complete one")
+	}
+	if !strings.Contains(quiet.Text(), "never transcribed") {
+		t.Errorf("skipped segments are not disclosed:\n%s", quiet.Text())
+	}
+	if strings.Contains(full.Text(), "never transcribed") {
+		t.Errorf("a complete transcript claims segments were skipped:\n%s", full.Text())
+	}
+}
