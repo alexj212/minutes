@@ -12,11 +12,11 @@ import (
 // command here is that shape: an optional id followed by flags.
 func TestFlagsAfterPositionalsAreParsed(t *testing.T) {
 	cases := []struct {
-		name       string
-		args       []string
-		wantModel  string
-		wantForce  bool
-		wantIDs    []string
+		name      string
+		args      []string
+		wantModel string
+		wantForce bool
+		wantIDs   []string
 	}{
 		{
 			name:      "flags before the id, which always worked",

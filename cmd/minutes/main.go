@@ -270,6 +270,28 @@ type Component struct {
 	// Present is whether it is actually installed. A release that landed
 	// half-way is the failure this field exists to make visible.
 	Present bool `json:"present"`
+	// Degraded says, in words meant for whoever installs this, why the
+	// component works here but will not work as well elsewhere. Empty when
+	// there is nothing wrong with it.
+	//
+	// Present and Degraded are different questions. A component can be present,
+	// correct, checksummed and complete, and still be useless to the machine
+	// that receives it — a macOS helper signed ad-hoc carries a designated
+	// requirement that is a bare hash of its own bytes, so the consent grant it
+	// is given does not survive the trip. That set installs cleanly, reports
+	// the right version, and refuses to record, which is the failure shape this
+	// project keeps meeting: it does not fail, it just does not work, and
+	// nobody is told why.
+	//
+	// A string rather than a boolean because the reason is the part a recipient
+	// needs, and a boolean throws it away.
+	//
+	// It must be MEASURED from the artifact, never remembered from the build.
+	// The helper on disk at publish time is not necessarily the one the build
+	// produced — somebody rebuilds, copies one in, restores a backup — and a
+	// field recording what a script intended is the same mistake as a manifest
+	// naming the machine a recording did not come from. Ask the binary.
+	Degraded string `json:"degraded,omitempty"`
 }
 
 // Version is what this build is, and what it needs beside it.
@@ -338,6 +360,7 @@ func describeVersion() Version {
 	hc := Component{Name: "minutes-capture", Platform: helperPlatform(helper)}
 	if err == nil {
 		hc.Name, hc.Path, hc.Present = filepath.Base(helper), helper, true
+		hc.Degraded = helperDegraded(helper)
 	}
 	v.Components = append(v.Components, hc)
 	return v

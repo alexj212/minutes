@@ -28,6 +28,24 @@ case "$json" in
 	;;
 esac
 
+# A component can be present, correct and complete and still be useless to the
+# machine that receives it — a macOS helper signed ad-hoc carries a designated
+# requirement that is a hash of its own bytes, so the consent grant it earns
+# here does not survive the trip. That set installs cleanly, reports the right
+# version, and refuses to record. It does not fail; it just does not work.
+if printf '%s' "$json" | grep -q '"degraded"'; then
+	if [ -z "$ALLOW_DEGRADED" ]; then
+		echo "refusing to publish a degraded set:" >&2
+		printf '%s\n' "$json" | grep -A1 '"degraded"' >&2
+		echo >&2
+		echo "every component is present, and one of them will not work properly on the" >&2
+		echo "machine that installs it. Fix it, or ALLOW_DEGRADED=1 to publish anyway —" >&2
+		echo "the reason is carried to whoever receives it either way." >&2
+		exit 1
+	fi
+	echo "publishing a degraded set because ALLOW_DEGRADED is set" >&2
+fi
+
 if printf '%s' "$json" | grep -q '"present": *false'; then
 	echo "refusing to publish an incomplete set:" >&2
 	printf '%s\n' "$json" >&2

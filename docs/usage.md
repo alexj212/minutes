@@ -542,6 +542,18 @@ knows what a complete copy of itself looks like:
 - **An incomplete set.** A set missing its helper installs fine, starts fine,
   and fails at the moment somebody tries to record. That is the worst time to
   discover it, so it is caught here instead.
+- **A degraded set.** Every component present, and one of them will not work
+  properly on the machine that installs it — a macOS helper signed ad-hoc
+  carries a designated requirement that is a hash of its own bytes, so the
+  consent grant it earns here does not survive the trip. `ALLOW_DEGRADED=1`
+  publishes anyway, and the reason travels with the set either way.
+
+`version --json` reports the third of these as a `degraded` string on the
+component, in words meant for whoever installs it. **It is measured from the
+binary on disk, never remembered from the build** — the helper being published
+is not necessarily the one the build script produced, and a field recording what
+a script intended is the same mistake as a manifest naming the machine a
+recording did not come from.
 
 ## When something is wrong
 
