@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -266,5 +267,57 @@ func TestPlatformDescribesThisMachineRatherThanAHardcodedOne(t *testing.T) {
 	if runtime.GOOS != "linux" && got == "wsl/windows" {
 		t.Errorf("platform() = %q on %s — the manifest names a machine this is not",
 			got, runtime.GOOS)
+	}
+}
+
+// -999 is a sentinel meaning "there was no signal to measure". Printed as
+// "-999.0 dBFS" it reads as very quiet, and a reader files the microphone under
+// "turned down" and carries on — which is what happened when a brief describing
+// a null microphone reached a session as "peak -999.0 dBFS".
+//
+// Asserted as a pair: a real level must still be reported as a level. A
+// function that said "no signal" for everything would fix the complaint and
+// destroy the field.
+func TestNoSignalIsNotReportedAsALevel(t *testing.T) {
+	null := Track{Name: "mic", Segments: []Segment{
+		{Frames: 48000, PeakDBFS: -999, Constant: true},
+	}}
+	real := Track{Name: "system", Segments: []Segment{
+		{Frames: 48000, PeakDBFS: -3.0},
+	}}
+
+	if null.LevelText() == real.LevelText() {
+		t.Fatal("a null track and a real one describe their level identically")
+	}
+	if strings.Contains(null.LevelText(), "-999") {
+		t.Errorf("the sentinel is printed as a measurement: %q", null.LevelText())
+	}
+	if !strings.Contains(null.LevelText(), "NO SIGNAL") {
+		t.Errorf("a null track does not say so: %q", null.LevelText())
+	}
+	if !strings.Contains(real.LevelText(), "-3.0 dBFS") {
+		t.Errorf("a real level lost its number: %q", real.LevelText())
+	}
+}
+
+// The question is "is this constant", never "is this quiet". A quiet room is
+// not constant; a denied microphone is.
+func TestConstantIsNotTheSameAsQuiet(t *testing.T) {
+	quiet := Track{Segments: []Segment{{Frames: 48000, PeakDBFS: -71.2}}}
+	denied := Track{Segments: []Segment{{Frames: 48000, PeakDBFS: -999, Constant: true}}}
+
+	if quiet.Constant() {
+		t.Error("a quiet room was reported as a constant signal")
+	}
+	if !denied.Constant() {
+		t.Error("an unvarying signal was not reported as constant")
+	}
+	// One good segment is enough to say the device works.
+	mixed := Track{Segments: []Segment{
+		{Frames: 48000, Constant: true},
+		{Frames: 48000, PeakDBFS: -20},
+	}}
+	if mixed.Constant() {
+		t.Error("a track with one live segment was reported as constant throughout")
 	}
 }

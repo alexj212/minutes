@@ -50,10 +50,17 @@ type Writer struct {
 	framesPerSegment uint64
 	framesPerSync    uint64
 
-	cur          *wav.Writer
-	curIndex     int
-	curPackets   int
-	curPeak      int16
+	cur        *wav.Writer
+	curIndex   int
+	curPackets int
+	curPeak    int16
+	// curMin and curMax are the raw extremes, unrectified, for deciding whether
+	// the signal is constant. curPeak cannot answer that: it is an amplitude,
+	// so a track pinned at a non-zero DC offset and a track carrying real audio
+	// both give it something to report.
+	curMin       int16
+	curMax       int16
+	sawData      bool
 	haveCur      bool
 	framesToSync uint64
 
@@ -128,11 +135,21 @@ func (w *Writer) WriteAt(frameOffset uint64, samples []int16, packetFlags uint32
 			take = space
 		}
 
-		chunk := rest[: take*uint64(w.channels)]
+		chunk := rest[:take*uint64(w.channels)]
 		if err := w.cur.WriteAt(within, chunk); err != nil {
 			return err
 		}
 		for _, s := range chunk {
+			if !w.sawData {
+				w.curMin, w.curMax, w.sawData = s, s, true
+			} else {
+				if s < w.curMin {
+					w.curMin = s
+				}
+				if s > w.curMax {
+					w.curMax = s
+				}
+			}
 			v := s
 			if v == math.MinInt16 {
 				v = math.MaxInt16
@@ -188,6 +205,7 @@ func (w *Writer) rotate(index int) error {
 	}
 	w.cur, w.curIndex, w.haveCur = f, index, true
 	w.curPackets, w.curPeak, w.framesToSync = 0, 0, 0
+	w.curMin, w.curMax, w.sawData = 0, 0, false
 
 	// Announced before any audio is in it, so a recording killed one second
 	// later still has this file named in the manifest rather than orphaned
@@ -220,6 +238,7 @@ func (w *Writer) emit(complete bool) error {
 		Frames:          w.cur.Frames(),
 		PaddedFrames:    w.cur.PaddedFrames,
 		PeakDBFS:        dbfs(w.curPeak),
+		Constant:        w.sawData && w.curMin == w.curMax,
 		Packets:         w.curPackets,
 		Complete:        complete,
 	}

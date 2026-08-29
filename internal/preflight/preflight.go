@@ -10,6 +10,7 @@
 package preflight
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,8 +19,12 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/alexj/minutes/internal/frame"
+	"github.com/alexj/minutes/internal/wav"
 )
 
 // TrackStatus is what the platform reported about one track.
@@ -280,6 +285,25 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 		return res, nil
 	}
 
+	// Everything above asked the device whether it would open. This asks
+	// whether anything comes out of it.
+	if res.CanRecord {
+		if silent, err := microphoneIsDigitallySilent(ctx, helper); err == nil && silent {
+			res.CanRecord = false
+			res.Mic.OK = false
+			res.Mic.Error = "delivered nothing but exact digital silence"
+			res.Refusal = "Refusing to record: the microphone opens and delivers silence.\n\n" +
+				"  Every sample is exactly zero, which a working microphone never produces —\n" +
+				"  a quiet room still has a noise floor. This is denied permission, a hardware\n" +
+				"  mute switch, or a disconnected device, and it is not a quiet room.\n\n" +
+				"  On macOS check System Settings > Privacy & Security > Microphone. A denied\n" +
+				"  microphone there is not an error the recorder can see: it opens, it starts,\n" +
+				"  and it hands over zeros.\n\n" +
+				"  Recording now would capture the far end and none of you."
+			return res, nil
+		}
+	}
+
 	if !res.CanRecord {
 		var b strings.Builder
 		b.WriteString("Refusing to record: one side of the meeting cannot be captured.\n\n")
@@ -342,4 +366,108 @@ func (r *Result) Describe() string {
 		b.WriteString("\n" + r.Refusal + "\n")
 	}
 	return b.String()
+}
+
+// probeMillis is how long the live-audio probe records for.
+//
+// Long enough for a noise floor to appear and short enough that preflight stays
+// something somebody runs before a meeting rather than instead of one. At
+// 48 kHz it is thousands of samples, and a working capture path cannot produce
+// thousands of consecutive exact zeros.
+const probeMillis = 700
+
+// microphoneIsDigitallySilent reports whether the microphone delivers an
+// unvarying signal.
+//
+// Every check before this one asks the device whether it will open. On macOS a
+// *denied* microphone opens: the audio unit starts, the stream format reads
+// back, every call returns success, and the samples are all zero. So preflight
+// passed, a real meeting recorded, and the operator's side was empty — found by
+// minutes-mac with Alex sitting at the machine. The system log said
+// "access to kTCCServiceMicrophone denied" and nothing in the capture path
+// could see it.
+//
+// The discriminator is categorical rather than a threshold, which is what makes
+// it safe to refuse on. A real microphone in a silent room gives a mean far
+// below its max, because a room is not constant — preamp noise, thermal noise,
+// room tone. A loudness cutoff would refuse a genuinely quiet room and put us
+// back to guessing; "every sample is identical" needs no guess.
+//
+// Constant rather than zero, which is the mac core session's refinement of this
+// and strictly better: it also catches a device pinned at a non-zero DC offset,
+// a dead cable and an interface that vanished, none of which are quiet rooms
+// and all of which a zero-check would pass.
+//
+// Microphone only, deliberately. A loopback track legitimately delivers nothing
+// while the render endpoint is idle, which it is before every meeting — there,
+// silence is the ordinary case rather than the alarming one.
+//
+// An error is not a refusal. If the probe cannot run, preflight reports what it
+// already knows rather than inventing a fault: this check can say "definitely
+// broken", never "definitely fine".
+func microphoneIsDigitallySilent(ctx context.Context, helper string) (bool, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(probeCtx, helper,
+		"--duration-ms", strconv.Itoa(probeMillis), "--mic-only")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return false, err
+	}
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	defer func() {
+		_ = cmd.Wait()
+	}()
+
+	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<16))
+	var info frame.TrackInfo
+	var haveInfo bool
+	var lo, hi int16
+	var seen bool
+	sawAudio := false
+	for {
+		f, err := reader.Next()
+		if err != nil {
+			break
+		}
+		if f.Type == frame.TypeTrackInfo && f.Track == frame.TrackMic {
+			if ti, err := frame.ParseTrackInfo(f.Payload); err == nil {
+				info, haveInfo = ti, true
+			}
+			continue
+		}
+		if f.Type != frame.TypeAudio || f.Track != frame.TrackMic || !haveInfo {
+			continue
+		}
+		samples, err := wav.ToInt16(f.Payload, info.FormatTag, info.BitsPerSample)
+		if err != nil || len(samples) == 0 {
+			continue
+		}
+		sawAudio = true
+		for _, v := range samples {
+			if !seen {
+				lo, hi, seen = v, v, true
+				continue
+			}
+			if v < lo {
+				lo = v
+			}
+			if v > hi {
+				hi = v
+			}
+		}
+		// Any variation at all means a live capture path. Checked as the frames
+		// arrive rather than at the end so a working microphone stops the probe
+		// early.
+		if seen && lo != hi {
+			return false, nil
+		}
+	}
+	// No audio at all is not this check's finding. The helper reported the
+	// track as OK and delivered no packets, which is a different fault and one
+	// the recording-time watcher is built to catch.
+	return sawAudio, nil
 }

@@ -127,6 +127,26 @@ see a recording is happening without being told. If it fails to start, the
 recording continues and says so; do not treat that as a reason to stop, and do
 not suggest disabling it.
 
+### A microphone that is denied looks exactly like one that is working
+
+**`preflight` now catches this, and it is worth knowing why it had to.** On
+macOS a denied microphone *opens*: the audio unit starts, the format reads back,
+every call returns success, and the samples are all zero. Nothing in the capture
+path can see it. A real meeting recorded the far end and none of the operator
+while preflight said `mic ok`.
+
+The check is **"is the signal constant"**, never "is it quiet". A real
+microphone in a silent room still varies — preamp noise, room tone. A signal
+with no variation at all is denied, muted, or unplugged.
+
+If preflight refuses for this, the fix is a permission or a cable, not a volume
+control. Every segment also carries `constant` in the manifest, so it can be
+checked afterwards on any machine.
+
+**A recording with a constant track will not auto-deliver.** It is stored, and
+`minutes deliver` sends it if the user asks — half a meeting reaching a
+summariser as a normal brief is the failure being avoided.
+
 ### If a track stops producing audio
 
 Sixty seconds in, a track that has delivered nothing raises a notification:
@@ -274,7 +294,7 @@ deleting anything unprompted.
 | Platform | State — what is **built**, not what is designed |
 |---|---|
 | **Windows, driven from WSL** | records. WASAPI capture + loopback, helper started over interop |
-| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant once. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it. The grant then persists, including across rebuilds, provided the helper was signed — `build.sh` does that automatically where a signing identity exists |
+| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant once. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it. The grant belongs to **whatever launched the helper**, not to the helper, so it can be revoked by that program updating — signing `minutes-capture` does not protect it |
 | **native Linux desktop** | **refuses.** The PulseAudio path (source + `<sink>.monitor`) is designed and not built |
 | **WSL as the audio source** | **refuses on purpose** — `RDPSink.monitor` carries only audio from Linux apps inside WSL, so a Teams/Zoom/browser meeting never touches it |
 

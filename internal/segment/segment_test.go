@@ -282,3 +282,51 @@ func TestSyncIntervalShrinksForShortSegments(t *testing.T) {
 		t.Errorf("syncInterval(4) = %v, want %v", got, want)
 	}
 }
+
+// A denied microphone on macOS opens, starts, reports its format and hands over
+// zeros, so nothing in the capture path can tell. The signature that survives
+// into the manifest is that the signal never varies.
+//
+// Asserted as a pair against real audio, because "constant" that is true of
+// everything is exactly as useless as one true of nothing — and the failing
+// direction here deletes a recording's credibility rather than a line.
+func TestConstantMarksANullSignalAndNotRealAudio(t *testing.T) {
+	write := func(name string, samples []int16) manifest.Segment {
+		t.Helper()
+		dir := t.TempDir()
+		var got manifest.Segment
+		w, err := NewWriter(dir, name, 48000, 1, 60)
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.OnSegment = func(s manifest.Segment) error { got = s; return nil }
+		if err := w.WriteAt(0, samples, 0); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	zeros := make([]int16, 4800)
+	dc := make([]int16, 4800)
+	for i := range dc {
+		dc[i] = 1200 // a pinned device: not silent, and not varying
+	}
+	room := make([]int16, 4800)
+	for i := range room {
+		room[i] = int16(i%7) - 3 // a noise floor, barely above nothing
+	}
+
+	if s := write("mic", zeros); !s.Constant {
+		t.Error("a null signal was not marked constant")
+	}
+	if s := write("mic", dc); !s.Constant {
+		t.Error("a signal pinned at a non-zero value was not marked constant — " +
+			"a zero-check would have missed this one")
+	}
+	if s := write("mic", room); s.Constant {
+		t.Errorf("a quiet room was marked constant (peak %.1f dBFS)", s.PeakDBFS)
+	}
+}

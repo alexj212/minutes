@@ -225,6 +225,55 @@ integrity that is checkable because it is signed, and not being stopped by
 Gatekeeper on a Mac that downloaded the file. A durable consent grant belongs to
 the launcher, which is not this project's binary.
 
+### ~~A denied microphone passed preflight and recorded silence~~ — fixed
+
+The worst instance of this project's recurring shape, because it arrived
+*through the gate built to prevent it*.
+
+On macOS a denied microphone **opens**. The audio unit starts, the stream format
+reads back, every call returns `noErr`, and the samples are all zero. So
+`minutes preflight` reported `mic ok` on a machine where the system log said
+`access to kTCCServiceMicrophone denied`, the recording ran, and the operator's
+side was empty. Found by `minutes-mac` with Alex sitting at the machine — the
+one window a human was there, spent on this instead of the attribution
+measurement it was booked for.
+
+Preflight's stated job was catching "a device that enumerates but refuses to
+start". This one enumerates, starts, and delivers nothing.
+
+**The discriminator is "is the signal constant", never "is it quiet".** A real
+microphone in a silent room gives a mean far below its max because a room is not
+constant — preamp noise, thermal noise, room tone. A loudness threshold would
+refuse a genuinely quiet room and put us back to guessing; constant is
+categorical.
+
+Two refinements from other sessions, both better than the first version:
+
+- The `mac` core session found the signature **in the WAV alone** — mean equals
+  max — where the original needed `tccd` output on the machine while it
+  happened. It survives the recording and can be checked afterwards on another
+  host, so it is stored per segment in the manifest as `constant`.
+- Constant rather than *zero*, which also catches a device pinned at a non-zero
+  DC offset, a dead cable, and an interface that vanished. A zero-check passes
+  all three. Mutation-tested: replacing the constant test with a zero-peak test
+  fails on the pinned case.
+
+`mac` found this by reading the brief it was auto-delivered — the first
+end-to-end exercise of the delivery path on darwin returned a defect report
+rather than notes, which is the delivery path working.
+
+### ~~A sentinel was printed in the units of a measurement~~ — fixed
+
+`-999` means "there was no signal to measure" and was printed as
+`peak -999.0 dBFS`. That reads as *very quiet*. A reader files the microphone
+under "turned down" and carries on — which is exactly what a brief describing a
+null microphone did when it reached a session.
+
+Same shape as `waiting` existing rather than collapsing into `error`, and as
+`Reanchors` always being written so absent and zero stay distinguishable. **A
+value meaning "not measured" must not wear the clothes of a measurement.** Found
+by the `mac` core session.
+
 ### There is no honest track name for a device that records a room
 
 Raised by `minutes-mac` while scoping what an iOS recorder would need. A phone

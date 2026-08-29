@@ -1459,6 +1459,30 @@ func autoDeliver(ctx context.Context, m *manifest.Manifest, cfg *config.Config, 
 			"paths that will not be there when somebody reads it", m.Dir())
 		return
 	}
+	// A recording the banner has just called half a meeting does not go out by
+	// itself.
+	//
+	// Automatic delivery is for the ordinary case, and its safety rests on the
+	// destination being this machine's own session — a person is in the loop.
+	// That argument does not stretch to a recording already known to be broken:
+	// it arrives as a normal brief, is read as a normal meeting, and the one
+	// thing worth knowing about it is in a banner the reader has no reason to
+	// expect. minutes-mac's half-empty test recording reached a session inbox
+	// this way while they were still reading the failure.
+	//
+	// Not deleted, not hidden — stored, with the reason. Deciding what a broken
+	// recording is worth is a judgment, which is the same argument that keeps
+	// the destination out of this program's hands.
+	for _, t := range m.Tracks {
+		if t.Constant() {
+			log("not delivering automatically: the %s track carries no signal at all — "+
+				"every sample identical, which is a denied, muted or disconnected device "+
+				"rather than a quiet one. Half a meeting was recorded. It is on disk; "+
+				"use `minutes deliver` if you want it sent anyway.", t.Name)
+			return
+		}
+	}
+
 	if cfg.Delivery.CoreSession == "" || to != cfg.Delivery.CoreSession {
 		log("not delivering automatically: %q is not this machine's own session, and sending "+
 			"a meeting to another project is publishing rather than filing. Use `minutes deliver`.", to)
@@ -1558,7 +1582,7 @@ func report(m *manifest.Manifest, judge bool) int {
 	silent := false
 	var mute []manifest.Track
 	for _, t := range m.Tracks {
-		peak := fmt.Sprintf("%.1f dBFS", t.PeakDBFS())
+		peak := t.LevelText()
 		switch {
 		case !t.Started():
 			peak = "starting"

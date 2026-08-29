@@ -111,7 +111,7 @@ func (b Brief) Body() string {
 			map[bool]string{true: fmt.Sprintf(", %d unattributed", c.Unattributed)}[c.Unattributed > 0])
 	}
 	for _, tr := range m.Tracks {
-		fmt.Fprintf(&s, "- %s track: %s, peak %.1f dBFS\n", tr.Name, tr.Device, tr.PeakDBFS())
+		fmt.Fprintf(&s, "- %s track: %s, %s\n", tr.Name, tr.Device, tr.LevelText())
 	}
 	fmt.Fprintf(&s, "- Transcribed by %s; the audio %s this machine\n",
 		t.Backend, map[bool]string{true: "**was sent off**", false: "stayed on"}[t.AudioLeftMachine])

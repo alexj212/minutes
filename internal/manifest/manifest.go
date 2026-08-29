@@ -66,7 +66,25 @@ type Segment struct {
 	// playing.
 	PaddedFrames uint64  `json:"paddedFrames"`
 	PeakDBFS     float64 `json:"peakDBFS"`
-	Packets      int     `json:"packets"`
+	// Constant means every sample in this segment is the same value.
+	//
+	// The question is "is this signal constant", never "is this signal quiet".
+	// A real microphone in a silent room gives a mean far below its max because
+	// a room is not constant — preamp noise, thermal noise, room tone. A signal
+	// with no variation at all is a denied permission, a mute switch, a dead
+	// cable, or a device that vanished. None of those is a quiet room, and a
+	// loudness threshold cannot tell them apart from one.
+	//
+	// Categorical rather than a threshold, which is what makes it safe to act
+	// on: quiet is a number somebody has to defend, constant is not.
+	//
+	// Found because a denied microphone on macOS opens, starts, reports its
+	// format, and hands over zeros — so preflight passed and a real meeting
+	// recorded the far end and none of the operator. The signature came from
+	// the mac core session reading the WAV, which is why it is stored here: it
+	// survives the recording and can be checked afterwards on another machine.
+	Constant bool `json:"constant,omitempty"`
+	Packets  int  `json:"packets"`
 	// Complete is false while a segment is still being written. A false here
 	// with no supervisor running means the recording was interrupted, and the
 	// file is still playable up to the last header flush.
@@ -114,6 +132,11 @@ func (t Track) Duration() float64 {
 }
 
 // PeakDBFS is the loudest point across the track's segments.
+// silentDBFS is the sentinel a segment carries when there was no signal to
+// measure. It matches internal/segment, and is duplicated rather than imported
+// because manifest must not depend on the writer.
+const silentDBFS = -999.0
+
 func (t Track) PeakDBFS() float64 {
 	peak := -999.0
 	for _, s := range t.Segments {
@@ -156,6 +179,43 @@ func (t Track) CarriesSpeech() bool { return t.PeakDBFS() > speechFloorDBFS }
 // design exists to catch, so it is asked of every recording rather than left
 // for somebody to notice.
 func (t Track) Silent() bool { return t.PeakDBFS() <= -90 }
+
+// Constant reports whether every segment of this track carries an unvarying
+// signal — the signature of a denied, muted, or disconnected device rather than
+// a quiet one.
+func (t Track) Constant() bool {
+	if len(t.Segments) == 0 {
+		return false
+	}
+	for _, s := range t.Segments {
+		if s.Frames > 0 && !s.Constant {
+			return false
+		}
+	}
+	return true
+}
+
+// LevelText is the peak, written for a person.
+//
+// -999 is a sentinel meaning "no signal", and it was being printed as
+// "-999.0 dBFS" — a value that means *not measured*, formatted in the units of
+// measurements. Somebody skimming that files the microphone under "turned
+// down" and carries on, which is precisely what happened: a brief reporting a
+// null microphone reached a session as "peak -999.0 dBFS".
+//
+// Same shape as `waiting` existing rather than collapsing into `error`, and as
+// Reanchors always being written so absent and zero stay distinguishable. A
+// value that means "there was nothing to measure" must not wear the clothes of
+// a measurement.
+func (t Track) LevelText() string {
+	if t.Constant() {
+		return "NO SIGNAL (every sample identical — denied, muted, or disconnected)"
+	}
+	if p := t.PeakDBFS(); p <= silentDBFS {
+		return "no signal"
+	}
+	return fmt.Sprintf("peak %.1f dBFS", t.PeakDBFS())
+}
 
 // Manifest is one recording.
 type Manifest struct {
