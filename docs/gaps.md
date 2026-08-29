@@ -729,6 +729,31 @@ related. Keep it stable — not because moving it revokes anything, which is the
 claim that turned out false, but because it is the name a person reads and a
 name that moves tells them nothing.
 
+### ~~A guard that could not run reported nothing~~ — fixed
+
+`scripts/mission-check.sh` was inert on macOS for the four hours it existed.
+macOS ships bash 3.2 as `/bin/sh`, which misparses `case` inside a command
+substitution — it reads a pattern's `)` as the end of the substitution. Fixed by
+`minutes-mac` with the POSIX leading-paren form.
+
+The portability bug is not the finding. **`make test` invoked it as
+`sh scripts/… || true`, so a guard that could not run looked exactly like a
+guard that passed** — the same sentence this project wrote a day earlier about
+its own microphone probe, one layer up and about the thing built to catch it.
+
+Two properties made it invisible. The failure only appeared on stderr, and only
+to somebody invoking the script directly; and it was found by `minutes-mac`
+running it once casually after an unrelated edit, not by any test. That is the
+third time this week the thing that caught a defect was somebody idly checking.
+
+So there are three outcomes now rather than two: clean, findings, and the guard
+itself broken. Findings stay advisory because they are warnings; **a guard that
+will not run is reported loudly, because nothing else will ever mention it.**
+
+The shape worth keeping is the one `minutes-mac` named: two checks whose failure
+mode is silence, guarding a file whose failure mode is silence. Neither would
+have said anything if the script simply never ran.
+
 ## What to fix next
 
 The three highest items are done: one application can be captured instead of the

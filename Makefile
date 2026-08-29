@@ -51,8 +51,20 @@ endif
 # Run from `test` because that is the moment somebody is about to believe a
 # result. The trap is not `go test` — it compiles what is here — it is the
 # manual check afterwards against whatever `minutes` happens to be on PATH.
+# `|| true` on a guard hides the guard failing to run.
+#
+# scripts/mission-check.sh was inert on macOS for four hours — bash 3.2 as
+# /bin/sh misparses `case` inside a command substitution — and said so only on
+# stderr, only to somebody invoking it directly. A check that cannot run is
+# indistinguishable from a check that passes, which is the sentence this project
+# has now written twice about its own code.
+#
+# So three outcomes rather than two: clean, findings, and the guard itself
+# broken. Findings are advisory here because they are warnings rather than
+# failures; a guard that will not run is reported loudly, because nothing else
+# will ever mention it.
 check-install:
-	@sh scripts/staleness-check.sh || true
+	@sh scripts/staleness-check.sh; s=$$?; 	if [ $$s -gt 1 ]; then 		echo "WARNING: scripts/staleness-check.sh did not run (exit $$s)." >&2; 		echo "         Nothing is checking whether the installed binary is this tree." >&2; 	fi
 
 # MISSION.md is enforced by silent truncation on the other side — over-length
 # rows and a seventh entry are dropped with no warning, and the file still reads
@@ -60,7 +72,7 @@ check-install:
 # each while specifically thinking about it. A limit enforced silently cannot be
 # complied with by attention, so it is checked here instead.
 check-mission:
-	@sh scripts/mission-check.sh || true
+	@sh scripts/mission-check.sh; s=$$?; 	if [ $$s -gt 1 ]; then 		echo "WARNING: scripts/mission-check.sh did not run (exit $$s)." >&2; 		echo "         Nothing is checking MISSION.md for rows that drop silently." >&2; 	fi
 
 test: check-install check-mission
 	$(GO) test ./...
