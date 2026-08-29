@@ -234,17 +234,41 @@ identifier and the certificate:
          and anchor apple generic
          and certificate leaf[subject.CN] = "Apple Development: ..."
 
-which does not move when the code does. Proven as a pair rather than as one
-observation: a change that altered the binary moved the cdhash from
-`64589417…` to `384c54f5…` while the requirement stayed byte-identical, and
-the grant survived. Before signing the operator was asked after every rebuild;
-after it, not once.
+which does not move when the code does.
+
+**That paragraph is wrong about why, and the correction matters more than the
+claim.** It was written from a correlation: before signing the operator was
+asked after every rebuild, after signing he was not. Both halves are true and
+the cause was something else.
+
+The grant is keyed on the **responsible process** — whatever launched the
+helper — and the helper is only ever the *accessing* process. Measured
+directly, same session, same responsible process, back to back:
+
+    properly signed helper   -> 0 prompts
+    ad-hoc helper            -> 0 prompts
+
+Renaming the identifier, which changes the designated requirement outright,
+also cost nothing. **The helper's signature does not determine whether TCC
+asks.** The earlier before-and-after was confounded: the session coordinator
+that actually holds the grant was itself ad-hoc signed and being rebuilt
+several times a day during the "before" window, and stopped being rebuilt
+during the "after" one. The variable that moved was never the helper.
+
+So sign the helper for the reasons signing is worth anything — integrity, a
+name a stranger can resolve, not tripping Gatekeeper on a machine that
+downloaded it — and do not expect it to buy a durable grant. What buys that is
+the *launcher* being signed with a stable identity, which is not this project's
+binary to control.
 
 `build.sh` discovers the identity rather than hardcoding it — `security
 find-identity`, overridable with `MINUTES_CODESIGN_IDENTITY` — and falls back
 to ad-hoc with a warning, because this repo is shared with machines that have
-no signing identity. There the build still works; the grant just is not
-durable.
+no signing identity.
+
+Untested, and worth saying rather than assuming: whether the helper's own
+signature ever governs consent on a launch path where nothing else is
+responsible for it. Every path measured here had a launcher.
 
 Preflight still has to be able to report *waiting for a human* as its own
 state. Signing makes that rare rather than constant, and the first grant on any
