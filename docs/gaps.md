@@ -568,6 +568,23 @@ reaches another project. Anything bound elsewhere waits for `minutes deliver`.
 That is a containment, not a solution. Process-specific loopback would be the
 solution.
 
+### ~~Nothing said the binary under test was older than the source~~ — fixed
+
+`make install` warned about a dirty tree and nothing warned that the installed
+binary predated the code. `minutes-mac` hit it three times in two days, once
+nearly reporting a working check as broken.
+
+`make test` now warns, comparing both the installed revision against HEAD and
+the build time against the newest source file. Either alone misses a case: a
+rebuild without a commit leaves the revision matching while the code has moved,
+and a commit without a rebuild leaves the timestamp fresh while the revision has
+not.
+
+**It found a real one on its first run.** The installed binary was stamped two
+commits behind despite `make install` having run in the same command as the
+commit. The root cause is not pinned — a re-run installed correctly — which is
+precisely the argument for a check rather than a habit.
+
 ## What to fix next
 
 The three highest items are done: one application can be captured instead of the

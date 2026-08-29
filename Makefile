@@ -15,7 +15,7 @@ CMDEXE  := /c/Windows/System32/cmd.exe
 # the Mac, which is why it is the default rather than /usr/local/bin.
 PREFIX ?= $(HOME)/bin
 
-.PHONY: all build helper test vet clean install uninstall dist publish preflight record
+.PHONY: all build helper test vet clean install uninstall dist publish preflight record check-install
 
 all: build helper
 
@@ -46,7 +46,15 @@ else
 	$(CMDEXE) /c 'native\windows\build.bat'
 endif
 
-test:
+# Warns when the installed binary is not this working tree.
+#
+# Run from `test` because that is the moment somebody is about to believe a
+# result. The trap is not `go test` — it compiles what is here — it is the
+# manual check afterwards against whatever `minutes` happens to be on PATH.
+check-install:
+	@sh scripts/staleness-check.sh || true
+
+test: check-install
 	$(GO) test ./...
 
 vet:
