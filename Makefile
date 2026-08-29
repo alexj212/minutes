@@ -15,7 +15,7 @@ CMDEXE  := /c/Windows/System32/cmd.exe
 # the Mac, which is why it is the default rather than /usr/local/bin.
 PREFIX ?= $(HOME)/bin
 
-.PHONY: all build helper test vet clean install uninstall dist publish preflight record check-install
+.PHONY: all build helper test vet clean install uninstall dist publish preflight record check-install check-mission
 
 all: build helper
 
@@ -54,7 +54,15 @@ endif
 check-install:
 	@sh scripts/staleness-check.sh || true
 
-test: check-install
+# MISSION.md is enforced by silent truncation on the other side — over-length
+# rows and a seventh entry are dropped with no warning, and the file still reads
+# correctly on disk. Two sessions tripped that twice in the file's first hour,
+# each while specifically thinking about it. A limit enforced silently cannot be
+# complied with by attention, so it is checked here instead.
+check-mission:
+	@sh scripts/mission-check.sh || true
+
+test: check-install check-mission
 	$(GO) test ./...
 
 vet:
