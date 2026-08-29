@@ -85,8 +85,9 @@ else
     /usr/bin/codesign --force --sign - \
         --identifier "$identifier" \
         "$out"
-    echo "signed ad-hoc: no codesigning identity found, so macOS will ask for" >&2
-    echo "audio permission again after every rebuild." >&2
+    echo "signed ad-hoc: no codesigning identity found. The binary works here," >&2
+    echo "but names no author anyone can resolve, and a Mac that downloads it" >&2
+    echo "may refuse to run it. It does not affect recording permission." >&2
 fi
 
 echo "built $out"
