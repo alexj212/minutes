@@ -8,11 +8,11 @@ rotation, crash safety and delivery all measured there — and the two-track
 attribution premise is the one claim the platform has never demonstrated.
 
 ## Waiting on
-- you: mic grant on the Mac · attribution unproven on darwin · System Settings toggle, one click
+- you: mic grant on the Mac · attribution unproven on darwin · one click in System Settings
 - you: 224 MB of recordings of you and your home · no retention has ever run · one word to delete
-- minutes-wsl: micNoPackets has no observed instance · may be unreachable · needs a device that declares and never writes
-- nobody: macOS recording indicator · the consent dialog names the launcher, so nothing discloses · NSStatusBar plus signing work
-- nobody: background room audio during a meeting · --app removes what the machine plays, not what the room says · unsolved
+- minutes-wsl: micNoPackets unwitnessed on darwin · may be unreachable · needs a device that never writes
+- nobody: macOS recording indicator · the consent dialog names the launcher · NSStatusBar plus signing
+- nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
 - 2026-08-29 a denied mic opens, starts and returns zeros; preflight now refuses on a constant signal rather than a quiet one
