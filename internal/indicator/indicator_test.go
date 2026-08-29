@@ -108,3 +108,66 @@ func TestFindHelperLooksBesideTheCaptureHelper(t *testing.T) {
 		t.Errorf("FindHelper = %q, want %q", got, tray)
 	}
 }
+
+// OnStop is supplied by the caller, so it may block — a handler that stops a
+// recording and waits for the manifest to be written is the obvious case, and
+// it is what this is wired to do.
+//
+// If OnStop runs on the reader goroutine, a blocking one wedges shutdown
+// permanently: Stop waits for the reader to finish, and the reader is inside a
+// handler waiting for Stop. Nothing times out and nothing reports it; the
+// process simply never exits.
+//
+// The pair is that a NON-blocking OnStop must still be delivered, which the
+// tests above cover — a fix that stopped calling OnStop at all would resolve
+// this deadlock perfectly.
+func TestABlockingStopHandlerDoesNotWedgeShutdown(t *testing.T) {
+	release := make(chan struct{})
+	called := make(chan struct{})
+
+	ind, err := Start(context.Background(), Options{
+		Helper: fakeTray(t, "READY\\nSTOP\\n"),
+		OnStop: func() {
+			close(called)
+			<-release // as a real handler would, until the recording is down
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("OnStop was never called")
+	}
+
+	done := make(chan struct{})
+	go func() { ind.Stop(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("Stop wedged: the reader is inside OnStop and the shutdown is waiting for the reader")
+	}
+	close(release)
+}
+func TestStopFromTrayCancellingItsOwnContextDoesNotWedge(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		ctx, cancel := context.WithCancel(context.Background())
+		ind, err := Start(ctx, Options{
+			Helper: fakeTray(t, "READY\\nSTOP\\n"),
+			OnStop: cancel,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		done := make(chan struct{})
+		go func() { ind.Stop(); close(done) }()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("Stop wedged: the reader and the shutdown are waiting on each other")
+		}
+		cancel()
+	}
+}

@@ -32,7 +32,15 @@ import (
 type Indicator struct {
 	cmd   *exec.Cmd
 	stdin *os.File
-	once  sync.Once
+	// read closes when the stdout reader has finished.
+	//
+	// os/exec documents that calling Wait before every read from StdoutPipe has
+	// completed is incorrect — Wait closes the pipe, and a reader still in it
+	// loses whatever was left. The race detector does not catch it and today it
+	// costs nothing, because the tray sends nothing after STOP. It would cost a
+	// dropped message the day it does.
+	read chan struct{}
+	once sync.Once
 }
 
 // Options configures one.
@@ -117,9 +125,10 @@ func Start(ctx context.Context, opt Options) (*Indicator, error) {
 	}
 	r.Close()
 
-	ind := &Indicator{cmd: cmd, stdin: w}
+	ind := &Indicator{cmd: cmd, stdin: w, read: make(chan struct{})}
 
 	go func() {
+		defer close(ind.read)
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			switch strings.TrimSpace(sc.Text()) {
@@ -128,7 +137,15 @@ func Start(ctx context.Context, opt Options) (*Indicator, error) {
 			case "STOP":
 				opt.Log("stop requested from the tray")
 				if opt.OnStop != nil {
-					opt.OnStop()
+					// In its own goroutine, and this is load-bearing rather
+					// than tidiness. OnStop belongs to the caller and may
+					// block — a handler that stops a recording and waits for
+					// the manifest to be written is the obvious case. Run
+					// inline, such a handler wedges shutdown permanently: Stop
+					// waits for this reader to finish and this reader is inside
+					// the handler waiting for Stop. Nothing times out and
+					// nothing reports it.
+					go opt.OnStop()
 				}
 			}
 		}
@@ -154,6 +171,7 @@ func (i *Indicator) Stop() {
 	}
 	i.once.Do(func() {
 		i.stdin.Close()
+		<-i.read
 		_ = i.cmd.Wait()
 	})
 }
