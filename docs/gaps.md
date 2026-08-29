@@ -525,7 +525,12 @@ What is left:
 2. **A desktop indicator on Windows**, where the meeting actually happens. The
    marker file and the notifications help; neither is on screen. Item 1 gave it
    something worth showing.
-3. **`minutes config`.** Hand-written JSON, no validation, and now with rather
+3. ~~**`minutes config`.**~~ **Done.** `minutes config` shows what is in effect
+   and says when there is no file; `minutes config set KEY VALUE` validates
+   before writing and refuses an unknown key with near-misses. Hand-edited JSON
+   silently ignored a mistyped key — the value sat in the file looking set while
+   the default ran, which is the worst shape a settings file has.
+4. **placeholder.** Hand-written JSON, no validation, and now with rather
    more in it.
 4. **Background room audio during a meeting.** `--app` removes what the machine
    plays; it cannot remove what the room says while the far end is talking.

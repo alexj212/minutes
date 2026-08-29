@@ -110,6 +110,12 @@ func usage() {
   minutes prune [--dry-run] [--force] [--root DIR]
         Apply the retention policy from the config. Off unless configured.
 
+  minutes config [--json]
+        Show the settings actually in effect, and where they are read from.
+
+  minutes config set KEY VALUE
+        Change one setting, validating it first. "set --help" lists the keys.
+
   minutes record [--duration D] [--name NAME] [--segment 5m] [--root DIR]
         Record in the foreground until the duration elapses or Ctrl-C.
 
@@ -160,6 +166,8 @@ func main() {
 		os.Exit(cmdRemove(args))
 	case "prune":
 		os.Exit(cmdPrune(args))
+	case "config":
+		os.Exit(cmdConfig(args))
 	case "apps":
 		os.Exit(cmdApps(args))
 	case "supervise":

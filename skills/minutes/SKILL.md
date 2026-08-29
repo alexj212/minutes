@@ -186,17 +186,30 @@ right for meetings; `tiny` is faster and hallucinates on quiet audio. Which back
 written into the manifest and the transcript, and `minutes list` marks such a
 meeting with `↑`. It is a question somebody may have to answer later.
 
-`~/.config/minutes/config.json` (absent = defaults): `transcription`
-(`backend`, `model` — default `small`, `language`, `device`, `afterStop`),
-`delivery` (`to`, `coreSession`, `auto`), `retention` (`keepDays`, `keepCount`,
-`keepUndelivered` — all off unless set).
+### Reading and changing settings
+
+`minutes config` shows what is actually in effect and says when there is no
+file, so "this is a default" and "this is what somebody chose" do not look
+alike. `minutes config set KEY VALUE` changes one, validating it first; an
+unknown key is refused with near-misses rather than silently ignored, which is
+what hand-editing the JSON used to do.
+
+`minutes config set --help` lists the keys. They are `transcription.{backend,
+model, language, device, baseUrl, apiKeyEnv, afterStop}`,
+`delivery.{to, coreSession, auto}` and
+`retention.{keepDays, keepCount, keepUndelivered}`.
+
+**`transcription.backend` is the one covered by the rule above.** Setting it to
+`openai` prints a warning saying every future recording will be uploaded —
+do not run it unless the user asked in those words.
 
 ## Disk
 
 **1.33 GB/hour** for both tracks, measured. Nothing prunes automatically.
 `minutes list` totals the directory; `minutes rm --older-than 720h` and
 `minutes prune --dry-run` are the cleanup, and `prune` does nothing unless a
-retention policy is configured. Mention the total when it gets large rather than
+retention policy is configured — `minutes config set retention.keepDays 30` is
+how it gets configured. Mention the total when it gets large rather than
 deleting anything unprompted.
 
 ## When something is wrong
