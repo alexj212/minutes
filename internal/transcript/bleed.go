@@ -31,6 +31,36 @@ const bleedOverlap = 2.0
 // model split it differently.
 const bleedSimilarity = 0.6
 
+// bleedRunWords is a contiguous run of words shared with the far end, at which
+// a microphone line is an echo whatever its overall similarity says.
+//
+// The containment test alone is the wrong instrument, and `minutes-mac` proved
+// it by accident: their far-end audio was one script looped ten times, nine
+// echoes were caught, and one escaped. Not a fragment — a complete, confident
+// 84-character sentence, which is the most credible thing in a transcript to
+// attribute to the wrong person. Whisper had segmented the two tracks
+// differently, so the far-end line absorbed the tail of the previous sentence
+// and cut early, and containment came out 9/17 = 0.529 against a 0.6 cutoff.
+//
+// Whisper's segmentation is not stable across two recordings of the same audio,
+// so any test on whole-line similarity is measuring where the model chose to
+// cut. A contiguous run is not: the same words in the same order arrive in both
+// transcriptions however they are chopped.
+//
+// Five is measured, not chosen. Across 700+ microphone lines of real meetings
+// on speakers, lines with no textual relationship to the far end (containment
+// below 0.35) reached a shared run of five words ZERO times, while confirmed
+// echoes clustered at four to eight and beyond. The escaped line shared nine:
+// "i will put the numbers in the shared folder".
+//
+// Two other candidates were measured and rejected. The acoustic level test does
+// not separate these at all — on both recordings the confirmed echoes were as
+// loud as the operator, 177 and 313 of them, because the speakers were loud
+// enough that an echo arrives at nearly full level. And a pure time-overlap
+// test would have deleted 182 lines of the operator genuinely talking over the
+// far end in a single meeting.
+const bleedRunWords = 5
+
 // SuppressBleed removes microphone lines that are echoes of system lines, and
 // reports how many it dropped.
 //
@@ -70,7 +100,11 @@ func isEchoOf(l Line, system []Line) bool {
 		if s.End < l.Start-bleedOverlap || s.Start > l.End+bleedOverlap {
 			continue
 		}
-		if containment(a, words(s.Text)) >= bleedSimilarity {
+		b := words(s.Text)
+		if containment(a, b) >= bleedSimilarity {
+			return true
+		}
+		if longestRun(a, b) >= bleedRunWords {
 			return true
 		}
 	}
@@ -109,6 +143,35 @@ func containment(a, b []string) float64 {
 		smaller = len(b)
 	}
 	return float64(shared) / float64(smaller)
+}
+
+// longestRun is the longest run of words appearing contiguously in both lines.
+//
+// Robust to the thing containment is not: where a speech model chose to cut.
+// Two transcriptions of the same speech disagree about sentence boundaries and
+// therefore about whole-line similarity, but they agree about the words in the
+// middle and their order.
+func longestRun(a, b []string) int {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	best := 0
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for i := 1; i <= len(a); i++ {
+		for j := 1; j <= len(b); j++ {
+			if a[i-1] == b[j-1] {
+				cur[j] = prev[j-1] + 1
+				if cur[j] > best {
+					best = cur[j]
+				}
+			} else {
+				cur[j] = 0
+			}
+		}
+		prev, cur = cur, prev
+	}
+	return best
 }
 
 // maxFragmentWords bounds what counts as a fragment.

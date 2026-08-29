@@ -222,6 +222,37 @@ emits one yet and a name invented ahead of its first use is a guess with a
 version number. When a device does record a room, the answer has to arrive with
 it.
 
+### ~~An echo escaped because whisper cut the two tracks differently~~ — fixed
+
+`gaps.md` used to say a *short fragment* could evade the text comparison. That
+was wrong about the mechanism, and `minutes-mac` proved it by accident: their
+far-end audio was one script looped ten times, so the same sentence was
+presented ten times under identical conditions. **Nine were caught and one
+escaped** — a complete, confident 84-character sentence, which is the most
+credible thing in a transcript to attribute to the wrong person.
+
+Whisper's segmentation is not stable across two recordings of the same audio.
+The far-end line absorbed the tail of the previous sentence and cut early, so
+containment came out 9/17 = 0.529 against a 0.6 cutoff. **Length was
+incidental.** Any test on whole-line similarity is really measuring where the
+model chose to cut.
+
+A contiguous shared run is not. Five words is measured rather than chosen:
+across 700+ microphone lines of real meetings on speakers, lines with no
+textual relationship to the far end reached a five-word shared run **zero
+times**, while confirmed echoes clustered at four to eight and beyond.
+
+Two other fixes were measured and rejected, and both are worth recording
+because both sounded right:
+
+- **The acoustic level test does not separate these at all.** On both
+  recordings the confirmed echoes were as loud as the operator — 177 and 313 of
+  them — because the speakers were loud enough that an echo arrives at nearly
+  full level. The level pass only ever fires on genuinely faint fragments.
+- **A pure time-overlap test would have deleted 182 lines** of the operator
+  genuinely talking over the far end, in a single meeting. Reasoning from one
+  escaped case suggested it; the distribution refused it.
+
 ### Speaker labels are only as good as the far-end capture
 
 Found by the `wsl` session reviewing two app-scoped recordings. When the far-end
@@ -349,7 +380,7 @@ at roughly **real time**, and both tracks are transcribed, so a 30-minute
 meeting occupies the GPU for about 30–45 minutes afterwards. Nothing queues
 this — stopping two meetings close together will have them competing.
 
-### ~~Short bleed fragments evade suppression~~ — a second pass now catches them by level
+### ~~Short bleed fragments evade suppression~~ — a second pass catches them by level, and a shared-run test catches the long ones
 
 Found by the recording that finally proved attribution. The last line of it was:
 

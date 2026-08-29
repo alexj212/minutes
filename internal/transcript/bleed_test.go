@@ -1,6 +1,9 @@
 package transcript
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func mic(start, end float64, text string) Line {
 	return Line{Start: start, End: end, Track: "mic", Speaker: SpeakerYou, Text: text}
@@ -127,8 +130,8 @@ func TestNormalisationIgnoresCaseAndPunctuation(t *testing.T) {
 
 // The failure this second pass exists for, taken from a real recording:
 //
-//   [00:00:26] Others: The open question is whether we keep the old end
-//   [00:00:28] You:    all
+//	[00:00:26] Others: The open question is whether we keep the old end
+//	[00:00:28] You:    all
 //
 // "all" is the tail of "...the old endpoint alive" arriving through the air.
 // The far-end transcript was cut before "alive", so the word appears nowhere in
@@ -138,7 +141,7 @@ func TestQuietFragmentDuringFarEndSpeechIsDropped(t *testing.T) {
 		sys(26, 29, "The open question is whether we keep the old end"),
 		mic(28, 29, "all"),
 	}
-	const reference = -6.0 // this person speaks at about -6 dBFS
+	const reference = -6.0                                         // this person speaks at about -6 dBFS
 	measure := func(l Line) (float64, bool) { return -30.0, true } // the fragment is faint
 
 	kept, dropped := suppressQuietFragments(lines, reference, measure)
@@ -213,5 +216,69 @@ func TestMicOnlyRecordingSkipsTheLevelPass(t *testing.T) {
 	kept, dropped := suppressQuietFragments(lines, -6.0, measure)
 	if len(dropped) != 0 || len(kept) != 2 {
 		t.Error("dropped lines from a recording with no far end at all")
+	}
+}
+
+// The real escape, from minutes-mac's twelve-minute run on macOS: one script
+// looped ten times, nine echoes caught and one published as the operator's
+// words. Not a fragment — a complete, confident sentence, which is the most
+// credible thing in a transcript to get wrong.
+//
+// Whisper segmented the two tracks differently, so the far-end line absorbed
+// the tail of the previous sentence and cut early. Containment came out
+// 9/17 = 0.529 against a 0.6 cutoff, and it was published.
+//
+// Asserted as a pair against genuine speech that overlaps the far end and
+// shares scattered stopwords with it. A test that only knew the escape would
+// pass just as happily if the rule suppressed everything overlapping — which is
+// the fix that was considered and rejected, because it would have deleted 182
+// lines of the operator genuinely talking over the far end in one meeting.
+func TestAnEchoWhisperSegmentedDifferentlyIsStillAnEcho(t *testing.T) {
+	system := Line{
+		Track: "system", Start: 203.39, End: 208.0,
+		Text: "direction if the pilot does not work out. I will put the numbers in the shared folder",
+	}
+	escaped := Line{
+		Track: "mic", Start: 206.40, End: 211.0,
+		Text: "I will put the numbers in the shared folder after this call, so everybody can look at",
+	}
+	// Genuine: the operator talking over the far end, sharing only the words
+	// two English sentences share by accident.
+	genuine := Line{
+		Track: "mic", Start: 204.0, End: 207.0,
+		Text: "sorry, could you say that again? I did not catch the last part of it",
+	}
+
+	kept, dropped := SuppressBleed([]Line{system, escaped, genuine})
+
+	var keptMic []string
+	for _, l := range kept {
+		if l.Track == "mic" {
+			keptMic = append(keptMic, l.Text)
+		}
+	}
+	if len(dropped) != 1 {
+		t.Fatalf("dropped %d lines, want exactly the echo; kept mic lines: %v", len(dropped), keptMic)
+	}
+	if !strings.Contains(dropped[0].Text, "numbers in the shared folder") {
+		t.Errorf("dropped the wrong line: %q", dropped[0].Text)
+	}
+	if len(keptMic) != 1 || !strings.Contains(keptMic[0], "say that again") {
+		t.Errorf("genuine speech over the far end was not kept: %v", keptMic)
+	}
+}
+
+// Five is measured: genuine speech never reached a shared run of five across
+// 700+ real microphone lines. Four must therefore not be enough, or the margin
+// that made five safe is not being enforced.
+func TestAShortSharedRunIsNotAnEcho(t *testing.T) {
+	if got := longestRun(words("we should ship it on friday morning"), words("ship it on friday but not before")); got != 4 {
+		t.Fatalf("longestRun = %d, want 4 for this fixture", got)
+	}
+	system := Line{Track: "system", Start: 10, End: 14, Text: "ship it on friday but not before"}
+	mic := Line{Track: "mic", Start: 11, End: 15, Text: "we should ship it on friday morning"}
+	_, dropped := SuppressBleed([]Line{system, mic})
+	if len(dropped) != 0 {
+		t.Errorf("a four-word shared run was treated as an echo: %q", dropped[0].Text)
 	}
 }
