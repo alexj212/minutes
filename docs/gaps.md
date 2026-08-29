@@ -283,7 +283,13 @@ success.
 Two things follow, and the second is the general one:
 
 - **A microphone has three states, not two**, and this is the fifth place that
-  distinction has been got wrong here. Delivered varying audio, delivered a
+  distinction has been got wrong here. (A fourth state was briefly believed —
+  a denied macOS microphone delivering *nothing* rather than zeros. That was
+  two people independently tripping the same stdin contract from different
+  directions and each reading the symptom as a platform behaviour. It does not
+  exist. The `micNoPackets` verdict is still right, on the strength of the
+  44-minute Windows standup, and is simply unwitnessed on darwin — which is not
+  the same as impossible.) Delivered varying audio, delivered a
   constant signal, delivered nothing at all. The third is not a milder second —
   a track that declares its format and then never writes to it is arguably the
   *stronger* signal, since a constant signal at least requires arguing that

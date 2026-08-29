@@ -290,9 +290,7 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 	if res.CanRecord {
 		// The two failure modes are kept apart. The operator's action is the
 		// same — a permission or a cable — but the evidence differs, and
-		// merging them loses the ability to say which was seen. A denied macOS
-		// microphone produces both, and changed between them inside twenty
-		// minutes on the same binary.
+		// merging them loses the ability to say which was seen.
 		const advice = "\n\n  On macOS check System Settings > Privacy & Security > Microphone.\n" +
 			"  A denied microphone there is not an error the recorder can see: it opens,\n" +
 			"  it starts, and every call returns success.\n\n" +
@@ -421,8 +419,20 @@ const (
 	// cable. Not a quiet room: a real room is not constant.
 	micConstant
 	// micNoPackets means the track was declared and nothing was ever written to
-	// it. Seen on a denied macOS microphone, which has both failure modes and
-	// changed between them inside twenty minutes on the same binary.
+	// it.
+	//
+	// **Real, and currently unwitnessed on darwin — which is not the same as
+	// impossible.** It was briefly believed to be a second failure mode of a
+	// denied macOS microphone; that was two people independently tripping the
+	// stdin contract from different directions and reading the symptom as a
+	// platform behaviour. A denied microphone delivers zeros.
+	//
+	// The confirmed instance is on Windows and is the reason this verdict
+	// exists at all: a real 44-minute standup where the helper wrote "track mic
+	// ended after 0 audio frames" and nothing consumed it. A track that
+	// declares a format and never writes to it is a different thing from one
+	// that writes zeros, whether or not the machine in front of you has managed
+	// it yet.
 	micNoPackets
 )
 
