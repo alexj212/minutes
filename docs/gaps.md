@@ -170,6 +170,32 @@ session that writes the notes, so a false split there has no field beside it a
 reader could check against — unlike the JSON, which at least carries
 `unattributed: true`.
 
+### ~~A track that captured nothing was treated as a track that was silent~~ — fixed
+
+The worst defect found in this project, and it was found in a real recording
+that had already been delivered.
+
+`hasFarEndTrack` was careful from the beginning — *"a track declared and never
+written to is the same thing as no track"* — and it was only ever asked about
+the **far end**. Nothing asked it about the microphone, because the microphone
+is the track you assume is there.
+
+On 2026-08-27 it was not there. A 44-minute standup with contractors captured
+8 segments of system audio and **zero microphone frames**. Every one of the 436
+lines was labelled `Others` — correctly, since they all came from the system
+track — and the transcript was delivered to another project reading as a
+complete record of a meeting in which the operator never spoke.
+
+The helper had already said so. `recorder.log` line 5:
+
+    track mic ended after 0 audio frames
+
+Nothing consumed it. The check is now asked of both tracks, and a lost
+microphone gets its own banner above the withheld notice and its own line in
+the brief — because unlike every other disclosure here, **the labels are not
+wrong**. What is wrong is that half the conversation is missing, and correct
+labels on half a meeting look exactly like a complete one.
+
 ### There is no honest track name for a device that records a room
 
 Raised by `minutes-mac` while scoping what an iOS recorder would need. A phone

@@ -125,6 +125,20 @@ type Transcript struct {
 	// is published as the operator. Real words, wrong mouth, and the operator's
 	// is the worst one to get wrong.
 	AttributionUnreliable string `json:"attributionUnreliable,omitempty"`
+	// MicrophoneLost records that the operator's own track captured nothing.
+	//
+	// Distinct from every other disclosure here, which is about labels being
+	// wrong. These labels are right: everything present really was the far end.
+	// What is wrong is the *record* — one side of the conversation is simply
+	// absent, and a transcript in which the operator never speaks is
+	// indistinguishable from a meeting in which they never spoke.
+	//
+	// The far end was checked from the beginning and the microphone was not,
+	// because the microphone is the one you assume is there. A real 44-minute
+	// standup was transcribed, attributed entirely to "Others" and delivered to
+	// another project before anybody noticed the helper had already said
+	// "track mic ended after 0 audio frames" in the log.
+	MicrophoneLost bool `json:"microphoneLost,omitempty"`
 	// ModelDoubted counts spans the model judged unlikely to contain speech.
 	//
 	// Not "invented": the model doubting a span does not establish that the
@@ -396,6 +410,16 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 			"this meeting was on speakers rather than headphones, so the microphone "+
 			"also heard the far end", dropped)
 	}
+	// Asked of the microphone as well as the far end. A recording missing the
+	// operator's own audio still produces correct labels, so nothing else here
+	// would ever notice it.
+	if !trackHasAudio(m, "mic") {
+		out.MicrophoneLost = true
+		log("nothing was captured from the microphone: everything you said in this " +
+			"meeting is absent from the transcript. The labels below are right and the " +
+			"record is not complete")
+	}
+
 	// Whether this recording can support speaker labels at all, before asking
 	// whether the ones it has are any good.
 	if !hasFarEndTrack(m) {
@@ -423,11 +447,21 @@ func Build(ctx context.Context, m *manifest.Manifest, t transcribe.Transcriber, 
 // never written to is the same thing as no track, and treating them differently
 // would be the empty-versus-unknown mistake in a third place.
 func hasFarEndTrack(m *manifest.Manifest) bool {
-	far, ok := trackNamed(m, "system")
+	return trackHasAudio(m, "system")
+}
+
+// trackHasAudio reports whether a named track captured anything at all.
+//
+// Not whether it is listed — whether it holds frames. This is the same
+// question for every track, which is the point: it was originally asked only
+// of the far end, because the microphone was assumed to be there. It was not,
+// once, for forty-four minutes.
+func trackHasAudio(m *manifest.Manifest, name string) bool {
+	t, ok := trackNamed(m, name)
 	if !ok {
 		return false
 	}
-	for _, seg := range far.Segments {
+	for _, seg := range t.Segments {
 		if seg.Frames > 0 {
 			return true
 		}
@@ -572,6 +606,19 @@ func (t *Transcript) Text() string {
 		}
 		b.WriteString("#\n" + banner + "\n#\n")
 		for _, line := range strings.Split(wrapAt(t.AttributionUnreliable, 72), "\n") {
+			fmt.Fprintf(&b, "# %s\n", line)
+		}
+		b.WriteString("#\n")
+	}
+	// Above the withheld notice, because this is about what is not here at all
+	// rather than about what was set aside with a reason.
+	if t.MicrophoneLost {
+		b.WriteString("#\n# \u26a0 YOUR OWN AUDIO IS MISSING FROM THIS RECORDING\n#\n")
+		for _, line := range strings.Split(wrapAt("Nothing was captured from the microphone, so "+
+			"everything you said is absent. The speaker labels below are correct — what is "+
+			"here really was the other side — but this is one half of a conversation, and a "+
+			"transcript in which you never speak looks exactly like a meeting in which you "+
+			"did not.", 72), "\n") {
 			fmt.Fprintf(&b, "# %s\n", line)
 		}
 		b.WriteString("#\n")

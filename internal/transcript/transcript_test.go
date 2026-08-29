@@ -821,3 +821,43 @@ func TestWithheldLinesAreUnattributedToo(t *testing.T) {
 		}
 	}
 }
+
+// The far end being missing was checked from the start; the microphone was not,
+// because it is the track you assume is there. A real 44-minute standup was
+// transcribed with zero microphone frames, attributed entirely to "Others", and
+// delivered — with the helper's own "track mic ended after 0 audio frames"
+// sitting unread in the log.
+//
+// Asserted as a pair. A test that only knew what the missing-microphone case
+// says would pass just as happily if every transcript said it, which is the
+// blindness that let the asymmetry survive in the first place.
+func TestAMissingMicrophoneIsDisclosed(t *testing.T) {
+	build := func(micFrames uint64) *Transcript {
+		m := &manifest.Manifest{Tracks: []manifest.Track{
+			{Name: "system", SampleRate: 44100, Segments: []manifest.Segment{{Frames: 44100}}},
+			{Name: "mic", SampleRate: 48000, Segments: []manifest.Segment{{Frames: micFrames}}},
+		}}
+		out := &Transcript{RecordingID: "r", Backend: "b", Recorded: true}
+		if !trackHasAudio(m, "mic") {
+			out.MicrophoneLost = true
+		}
+		return out
+	}
+
+	present, lost := build(48000), build(0)
+	if present.MicrophoneLost {
+		t.Error("a microphone that captured audio was reported lost")
+	}
+	if !lost.MicrophoneLost {
+		t.Fatal("a microphone that captured nothing was not reported lost")
+	}
+	if present.Text() == lost.Text() {
+		t.Fatal("a recording missing the microphone reads identically to one that is complete")
+	}
+	if !strings.Contains(lost.Text(), "YOUR OWN AUDIO IS MISSING") {
+		t.Errorf("no banner on a transcript missing the microphone:\n%s", lost.Text())
+	}
+	if strings.Contains(present.Text(), "MISSING") {
+		t.Errorf("a complete recording claims something is missing:\n%s", present.Text())
+	}
+}

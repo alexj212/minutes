@@ -115,6 +115,14 @@ func (b Brief) Body() string {
 	}
 	fmt.Fprintf(&s, "- Transcribed by %s; the audio %s this machine\n",
 		t.Backend, map[bool]string{true: "**was sent off**", false: "stayed on"}[t.AudioLeftMachine])
+	// Stated before the ask, not among the details. A session writing notes from
+	// a half-recorded meeting has to know it is half a meeting.
+	if t.MicrophoneLost {
+		fmt.Fprintf(&s, "- **Nothing was captured from the microphone.** Everything the operator "+
+			"said is absent. The speaker labels are correct — what is here really was the "+
+			"other side — but this is one half of a conversation. Say so in the notes, and "+
+			"do not record the operator as having been silent.\n")
+	}
 	if t.BleedSuppressed > 0 {
 		fmt.Fprintf(&s, "- %d microphone line(s) were dropped as echoes of the system track: "+
 			"this meeting played through speakers rather than headphones, so the microphone also heard "+
