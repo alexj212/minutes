@@ -262,6 +262,43 @@ Two refinements from other sessions, both better than the first version:
 end-to-end exercise of the delivery path on darwin returned a defect report
 rather than notes, which is the delivery path working.
 
+### ~~The check for a denied microphone could not fire~~ — fixed, and it had shipped
+
+The constant-signal check above was published in a state where it **could never
+refuse anything**, and preflight kept passing, and that looked identical to the
+check working.
+
+The helper stops on stdin EOF *or* its duration, whichever comes first — the
+contract that lets a recording end cleanly. `os/exec` gives a command with no
+`Stdin` an already-closed `/dev/null`, so the helper saw EOF immediately, wrote
+`TRACK_INFO`, and exited before capturing a sample. Measured on the real Windows
+helper: **117 bytes with no stdin, 182101 bytes with it held open.**
+
+The reason it passed rather than failed is the interesting half. "No packets"
+was being read as "nothing to report", on the stated grounds that an empty
+stream is a different fault caught elsewhere. That reasoning is sound for a
+recording and wrong for a preflight, and it turned a broken probe into a silent
+success.
+
+Two things follow, and the second is the general one:
+
+- **A microphone has three states, not two**, and this is the fifth place that
+  distinction has been got wrong here. Delivered varying audio, delivered a
+  constant signal, delivered nothing at all. The third is not a milder second —
+  a track that declares its format and then never writes to it is arguably the
+  *stronger* signal, since a constant signal at least requires arguing that
+  rooms are not constant. The sentence that settles it was already in this
+  codebase, about the far end: *a track declared and never written to is the
+  same thing as no track.* It had only ever been asked about the far end.
+- **A check that cannot fire is indistinguishable from a check that passes.**
+  The test suite could not have caught this: every fake helper in it emits its
+  frames and exits, so none exercised the stdin contract at all. There is now
+  one that emits audio *only while its stdin is open*, so the probe cannot pass
+  by accident.
+
+Found by `minutes-mac` pointing `90864db` at the one machine with a provably
+denied microphone and reporting that it still passed.
+
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
 `-999` means "there was no signal to measure" and was printed as

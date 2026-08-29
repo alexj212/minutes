@@ -288,18 +288,35 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 	// Everything above asked the device whether it would open. This asks
 	// whether anything comes out of it.
 	if res.CanRecord {
-		if silent, err := microphoneIsDigitallySilent(ctx, helper); err == nil && silent {
+		// The two failure modes are kept apart. The operator's action is the
+		// same — a permission or a cable — but the evidence differs, and
+		// merging them loses the ability to say which was seen. A denied macOS
+		// microphone produces both, and changed between them inside twenty
+		// minutes on the same binary.
+		const advice = "\n\n  On macOS check System Settings > Privacy & Security > Microphone.\n" +
+			"  A denied microphone there is not an error the recorder can see: it opens,\n" +
+			"  it starts, and every call returns success.\n\n" +
+			"  Recording now would capture the far end and none of you."
+		switch probeMicrophone(ctx, helper) {
+		case micConstant:
 			res.CanRecord = false
 			res.Mic.OK = false
-			res.Mic.Error = "delivered nothing but exact digital silence"
-			res.Refusal = "Refusing to record: the microphone opens and delivers silence.\n\n" +
-				"  Every sample is exactly zero, which a working microphone never produces —\n" +
-				"  a quiet room still has a noise floor. This is denied permission, a hardware\n" +
-				"  mute switch, or a disconnected device, and it is not a quiet room.\n\n" +
-				"  On macOS check System Settings > Privacy & Security > Microphone. A denied\n" +
-				"  microphone there is not an error the recorder can see: it opens, it starts,\n" +
-				"  and it hands over zeros.\n\n" +
-				"  Recording now would capture the far end and none of you."
+			res.Mic.Error = "delivered an unvarying signal"
+			res.Refusal = "Refusing to record: the microphone opens and delivers a constant signal.\n\n" +
+				"  Every sample is identical, which a working microphone never produces — a\n" +
+				"  quiet room still has a noise floor. This is denied permission, a mute\n" +
+				"  switch, or a dead cable. It is not a quiet room." + advice
+			return res, nil
+		case micNoPackets:
+			res.CanRecord = false
+			res.Mic.OK = false
+			res.Mic.Error = "declared a track and delivered no audio at all"
+			res.Refusal = "Refusing to record: the microphone declared its format and then\n" +
+				"  delivered nothing.\n\n" +
+				"  Not silence — no packets at all. A track declared and never written to is\n" +
+				"  the same thing as no track, and a working microphone here delivers its\n" +
+				"  first packet well inside the probe window, so this is not one that was\n" +
+				"  slow to start." + advice
 			return res, nil
 		}
 	}
@@ -373,39 +390,55 @@ func (r *Result) Describe() string {
 // Long enough for a noise floor to appear and short enough that preflight stays
 // something somebody runs before a meeting rather than instead of one. At
 // 48 kHz it is thousands of samples, and a working capture path cannot produce
-// thousands of consecutive exact zeros.
+// thousands of consecutive identical ones.
+//
+// It also has to be long enough that "no packets" means broken rather than
+// slow. Measured on the target Mac: a working microphone produced its first
+// packet, 75 audio frames and 153 KB, well inside this window. So a device that
+// delivers nothing here is not one that was still warming up.
 const probeMillis = 700
 
-// microphoneIsDigitallySilent reports whether the microphone delivers an
-// unvarying signal.
+// micVerdict is what a short live capture says about the microphone.
+//
+// Three states and not two, which is the distinction this project has now got
+// wrong in five places. "Delivered nothing" is not a milder "delivered
+// silence": a track that declares its format and then never writes to it is
+// arguably the stronger signal, because a constant signal at least requires
+// arguing that rooms are not constant.
+//
+// The sentence that settles it is already in this codebase, about the far end:
+// *a track declared and never written to is the same thing as no track*. It was
+// only ever asked about the far end.
+type micVerdict int
+
+const (
+	// micUnknown means the probe could not answer. Never a refusal: this check
+	// can establish "definitely broken" and never "definitely fine".
+	micUnknown micVerdict = iota
+	// micLive means the samples vary, which is what a capture path does.
+	micLive
+	// micConstant means every sample is identical — denied, muted, or a dead
+	// cable. Not a quiet room: a real room is not constant.
+	micConstant
+	// micNoPackets means the track was declared and nothing was ever written to
+	// it. Seen on a denied macOS microphone, which has both failure modes and
+	// changed between them inside twenty minutes on the same binary.
+	micNoPackets
+)
+
+// probeMicrophone runs a short capture and reports what came out.
 //
 // Every check before this one asks the device whether it will open. On macOS a
 // *denied* microphone opens: the audio unit starts, the stream format reads
-// back, every call returns success, and the samples are all zero. So preflight
-// passed, a real meeting recorded, and the operator's side was empty — found by
-// minutes-mac with Alex sitting at the machine. The system log said
-// "access to kTCCServiceMicrophone denied" and nothing in the capture path
-// could see it.
-//
-// The discriminator is categorical rather than a threshold, which is what makes
-// it safe to refuse on. A real microphone in a silent room gives a mean far
-// below its max, because a room is not constant — preamp noise, thermal noise,
-// room tone. A loudness cutoff would refuse a genuinely quiet room and put us
-// back to guessing; "every sample is identical" needs no guess.
-//
-// Constant rather than zero, which is the mac core session's refinement of this
-// and strictly better: it also catches a device pinned at a non-zero DC offset,
-// a dead cable and an interface that vanished, none of which are quiet rooms
-// and all of which a zero-check would pass.
+// back, every call returns success. Preflight passed, a real meeting recorded,
+// and the operator's side was empty — found by minutes-mac with Alex sitting at
+// the machine, with "access to kTCCServiceMicrophone denied" in the system log
+// and nothing in the capture path able to see it.
 //
 // Microphone only, deliberately. A loopback track legitimately delivers nothing
 // while the render endpoint is idle, which it is before every meeting — there,
 // silence is the ordinary case rather than the alarming one.
-//
-// An error is not a refusal. If the probe cannot run, preflight reports what it
-// already knows rather than inventing a fault: this check can say "definitely
-// broken", never "definitely fine".
-func microphoneIsDigitallySilent(ctx context.Context, helper string) (bool, error) {
+func probeMicrophone(ctx context.Context, helper string) micVerdict {
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
@@ -413,21 +446,40 @@ func microphoneIsDigitallySilent(ctx context.Context, helper string) (bool, erro
 		"--duration-ms", strconv.Itoa(probeMillis), "--mic-only")
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return false, err
+		return micUnknown
 	}
+	// stdin must stay open for the whole probe, and forgetting that made this
+	// check inert on both platforms.
+	//
+	// The helper stops on stdin EOF *or* the duration, whichever comes first —
+	// that is the contract that lets a recording end cleanly. os/exec gives a
+	// command with no Stdin an already-closed /dev/null, so the helper saw EOF
+	// immediately, emitted TRACK_INFO, and exited before capturing anything.
+	// Measured: 117 bytes with no stdin, 182101 bytes with it held open.
+	//
+	// It shipped that way and passed, because "no packets" was being read as
+	// "nothing to report". A check that cannot fire looks exactly like a check
+	// that passes.
+	r, w, err := os.Pipe()
+	if err != nil {
+		return micUnknown
+	}
+	cmd.Stdin = r
 	if err := cmd.Start(); err != nil {
-		return false, err
+		r.Close()
+		w.Close()
+		return micUnknown
 	}
+	r.Close()
 	defer func() {
+		w.Close()
 		_ = cmd.Wait()
 	}()
 
 	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<16))
 	var info frame.TrackInfo
-	var haveInfo bool
 	var lo, hi int16
-	var seen bool
-	sawAudio := false
+	var haveInfo, seen, sawAudio bool
 	for {
 		f, err := reader.Next()
 		if err != nil {
@@ -459,15 +511,22 @@ func microphoneIsDigitallySilent(ctx context.Context, helper string) (bool, erro
 				hi = v
 			}
 		}
-		// Any variation at all means a live capture path. Checked as the frames
-		// arrive rather than at the end so a working microphone stops the probe
-		// early.
+		// Any variation at all means a live capture path, and there is no
+		// reason to keep recording once that is established.
 		if seen && lo != hi {
-			return false, nil
+			return micLive
 		}
 	}
-	// No audio at all is not this check's finding. The helper reported the
-	// track as OK and delivered no packets, which is a different fault and one
-	// the recording-time watcher is built to catch.
-	return sawAudio, nil
+
+	switch {
+	case sawAudio:
+		return micConstant
+	case haveInfo:
+		// Declared a track and never wrote to it.
+		return micNoPackets
+	}
+	// The helper said the microphone was fine and then did not even declare it.
+	// That is a fault, but it is indistinguishable from the probe failing to
+	// run, so it is not grounds to refuse.
+	return micUnknown
 }

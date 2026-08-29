@@ -2,6 +2,7 @@ package preflight
 
 import (
 	"context"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"strings"
@@ -218,5 +219,144 @@ func TestSilenceAboutTheReasonIsNotAWait(t *testing.T) {
 }`)
 	if res.System.BlockedOnConsent() {
 		t.Error("a track with no stated reason was treated as waiting for a person")
+	}
+}
+
+// frameBytes builds one frame in the layout docs/protocol.md specifies.
+func frameBytes(typ uint16, track uint16, payload []byte) []byte {
+	h := make([]byte, 32)
+	binary.LittleEndian.PutUint32(h[0:], 0x314E494D)
+	binary.LittleEndian.PutUint16(h[4:], typ)
+	binary.LittleEndian.PutUint16(h[6:], track)
+	binary.LittleEndian.PutUint32(h[24:], uint32(len(payload)))
+	return append(h, payload...)
+}
+
+func micTrackInfo() []byte {
+	p := make([]byte, 24+3)
+	binary.LittleEndian.PutUint32(p[0:], 48000) // rate
+	binary.LittleEndian.PutUint16(p[4:], 1)     // channels
+	binary.LittleEndian.PutUint16(p[6:], 16)    // bits
+	binary.LittleEndian.PutUint16(p[8:], 1)     // formatTag: PCM
+	binary.LittleEndian.PutUint16(p[10:], 2)    // blockAlign
+	binary.LittleEndian.PutUint64(p[12:], 10_000_000)
+	binary.LittleEndian.PutUint32(p[20:], 3)
+	copy(p[24:], "mic")
+	return p
+}
+
+func pcm(values ...int16) []byte {
+	b := make([]byte, len(values)*2)
+	for i, v := range values {
+		binary.LittleEndian.PutUint16(b[i*2:], uint16(v))
+	}
+	return b
+}
+
+// probeHelper writes an executable that emits the given frames on stdout.
+func probeHelper(t *testing.T, out []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	data := filepath.Join(dir, "frames.bin")
+	if err := os.WriteFile(data, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(dir, "probe-helper")
+	body := "#!/bin/sh\ncat " + data + "\n"
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// A denied microphone has two failure modes and they must not be merged.
+//
+// Asserted as a set of three, because that is the distinction this project has
+// now got wrong in five places. Any two of these alone would pass a check that
+// collapsed the third into "fine" — which is exactly what happened: the
+// constant test shipped, and the machine it was written for had already moved
+// to the mode it does not cover.
+func TestTheThreeThingsAMicrophoneCanDo(t *testing.T) {
+	const (
+		typTrackInfo = 1
+		typAudio     = 2
+	)
+	info := frameBytes(typTrackInfo, 0, micTrackInfo())
+
+	live := append(append([]byte{}, info...), frameBytes(typAudio, 0, pcm(3, -2, 5, -1, 4))...)
+	constant := append(append([]byte{}, info...), frameBytes(typAudio, 0, pcm(0, 0, 0, 0, 0))...)
+	pinned := append(append([]byte{}, info...), frameBytes(typAudio, 0, pcm(1200, 1200, 1200))...)
+	nothing := append([]byte{}, info...)
+
+	for _, tc := range []struct {
+		name string
+		out  []byte
+		want micVerdict
+	}{
+		{"varying audio is a working device", live, micLive},
+		{"all zeros is denied or muted", constant, micConstant},
+		{"pinned at a non-zero value is a dead cable", pinned, micConstant},
+		{"declared and never written to is not silence", nothing, micNoPackets},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := probeMicrophone(context.Background(), probeHelper(t, tc.out))
+			if got != tc.want {
+				t.Errorf("probeMicrophone = %v, want %v", got, tc.want)
+			}
+		})
+	}
+
+	// A helper that says nothing at all cannot be distinguished from a probe
+	// that failed to run, so it must not refuse. This check establishes
+	// "definitely broken" and never "definitely fine".
+	if got := probeMicrophone(context.Background(), probeHelper(t, nil)); got != micUnknown {
+		t.Errorf("a silent helper gave %v, want micUnknown — refusing on this would refuse "+
+			"every machine where the probe cannot run", got)
+	}
+}
+
+// The probe must hold the helper's stdin open, and this is the test that would
+// have caught it not doing so.
+//
+// The helper stops on stdin EOF *or* its duration, whichever comes first — that
+// is the contract that lets a recording end cleanly. os/exec gives a command
+// with no Stdin an already-closed /dev/null, so the helper saw EOF immediately,
+// emitted TRACK_INFO and exited before capturing anything. Measured on the real
+// Windows helper: 117 bytes with no stdin, 182101 with it held open.
+//
+// It shipped and published in that state, and preflight kept passing, because
+// "no packets" was being read as "nothing to report". A check that cannot fire
+// is indistinguishable from a check that passes — which is the whole reason
+// this file's other tests assert three outcomes rather than one.
+//
+// The fake helper here emits audio ONLY if its stdin is still open, so the
+// probe cannot pass by accident.
+func TestTheProbeHoldsTheHelpersStdinOpen(t *testing.T) {
+	const (
+		typTrackInfo = 1
+		typAudio     = 2
+	)
+	dir := t.TempDir()
+	info := filepath.Join(dir, "info.bin")
+	audio := filepath.Join(dir, "audio.bin")
+	if err := os.WriteFile(info, frameBytes(typTrackInfo, 0, micTrackInfo()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(audio, frameBytes(typAudio, 0, pcm(3, -2, 5, -1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// timeout returns 124 only when cat was still waiting for input, which
+	// means stdin was held open rather than already at EOF.
+	script := filepath.Join(dir, "needs-stdin")
+	body := "#!/bin/sh\ncat " + info + "\ntimeout 0.4 cat > /dev/null\n" +
+		"if [ $? -eq 124 ]; then cat " + audio + "; fi\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := probeMicrophone(context.Background(), script); got != micLive {
+		t.Errorf("probeMicrophone = %v, want micLive — the helper only emits audio while "+
+			"its stdin is open, so this means the probe closed it and the check is inert", got)
 	}
 }
