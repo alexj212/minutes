@@ -325,6 +325,26 @@ captured hours after the thing capturing it went away.
 
 ---
 
+### If a track goes quiet
+
+Sixty seconds into a recording, any track that has not delivered a single audio
+packet raises a notification naming it:
+
+    ⚠ no audio on the mic track after 1m0s — if the meeting has started,
+      it is not being recorded
+
+**It is a measurement, not a diagnosis.** A loopback stream delivers nothing at
+all while the render endpoint is idle, and it is idle until something plays — so
+starting the recorder before you join the call will produce this for the system
+track, correctly and harmlessly. If the meeting has started and you see it, that
+track is not recording, and everything on it will be missing from the
+transcript.
+
+It notifies rather than writing to the log, because the log is a file. On
+2026-08-27 a 44-minute standup recorded zero microphone frames; the helper wrote
+exactly that into `recorder.log`, the transcript was delivered with one side of
+the conversation missing, and nobody read the line for two days.
+
 ## Transcribing
 
 ```

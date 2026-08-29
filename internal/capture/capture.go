@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -33,8 +34,31 @@ type Options struct {
 	// AppPID captures only that process and its children rather than
 	// everything the machine plays. Zero means system-wide.
 	AppPID int
-	Log      func(string, ...any)
+	Log    func(string, ...any)
+	// OnNoAudio is called once per track that has been declared but has not
+	// delivered a single audio frame, after NoAudioAfter has elapsed.
+	//
+	// It exists because the log is not where this can be reported. A supervised
+	// recording writes the log to a file, and on 2026-08-27 the helper's own
+	// "track mic ended after 0 audio frames" sat in one for two days while a
+	// 44-minute meeting was transcribed and delivered with half of it missing.
+	// Whoever wires this is expected to put it somewhere a person will see it
+	// while the meeting is still happening.
+	OnNoAudio func(track string, since time.Duration)
+	// NoAudioAfter is how long a declared track may deliver nothing before
+	// OnNoAudio fires. Zero uses DefaultNoAudioAfter.
+	NoAudioAfter time.Duration
 }
+
+// DefaultNoAudioAfter is how long a track may deliver nothing before it is
+// reported.
+//
+// Long enough not to fire on the ordinary case: a loopback stream delivers no
+// packets at all while the render endpoint is idle, and it is idle at the start
+// of every recording, until something plays. A minute of a meeting with nothing
+// audible is possible; it is also worth being told about, which is why the
+// wording reports the fact rather than diagnosing it.
+const DefaultNoAudioAfter = 60 * time.Second
 
 // Run records until Duration elapses or ctx is cancelled.
 //
@@ -105,8 +129,16 @@ func Run(ctx context.Context, opt Options) error {
 		// place is created with the first audio packet, because it needs the
 		// shared epoch and that is not known until one arrives.
 		place *timeline.Track
+		// audio counts packets, not samples. The question it answers is
+		// "has anything at all arrived on this track", which is the one nobody
+		// was asking.
+		audio    uint64
+		reported bool
 	}
 	tracks := map[frame.Track]*trackState{}
+	// Guards tracks against the watcher below. The reader owns every write;
+	// the watcher only reads.
+	var mu sync.Mutex
 	var epoch uint64
 	var epochSet bool
 	var runErr error
@@ -114,6 +146,54 @@ func Run(ctx context.Context, opt Options) error {
 	// track means a failed recording's manifest can say "the audio device was
 	// removed" rather than "exit status 1".
 	lastLog := map[frame.Track]string{}
+
+	// Watching for a track that never produces anything.
+	//
+	// Deliberately not a level check in preflight: on 2026-08-27 the device
+	// opened cleanly, reported its name and its sample rate, and then delivered
+	// nothing for 44 minutes. Preflight was happy. The only place this is
+	// visible is here, while the frames are — or are not — arriving.
+	after := opt.NoAudioAfter
+	if after <= 0 {
+		after = DefaultNoAudioAfter
+	}
+	if opt.OnNoAudio != nil {
+		go func() {
+			// Derived from the threshold rather than fixed, so detection is
+			// prompt at any threshold and a test does not have to wait out a
+			// production-sized one.
+			tick := after / 10
+			if tick < 10*time.Millisecond {
+				tick = 10 * time.Millisecond
+			}
+			t := time.NewTicker(tick)
+			defer t.Stop()
+			started := time.Now()
+			for {
+				select {
+				case <-stopped:
+					return
+				case <-t.C:
+				}
+				elapsed := time.Since(started)
+				if elapsed < after {
+					continue
+				}
+				mu.Lock()
+				var quiet []string
+				for id, ts := range tracks {
+					if ts.audio == 0 && !ts.reported {
+						ts.reported = true
+						quiet = append(quiet, id.String())
+					}
+				}
+				mu.Unlock()
+				for _, name := range quiet {
+					opt.OnNoAudio(name, elapsed)
+				}
+			}
+		}()
+	}
 
 	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<20))
 
@@ -149,7 +229,9 @@ loop:
 				runErr = err
 				break loop
 			}
+			mu.Lock()
 			tracks[f.Track] = &trackState{info: info, writer: sw}
+			mu.Unlock()
 			opt.Log("track %s: %s, %d Hz, %d ch", name, info.Device, info.SampleRate, info.Channels)
 
 		case frame.TypeAudio:
@@ -180,6 +262,9 @@ loop:
 					ts.place = timeline.NewTrack(uint64(ts.info.SampleRate), epoch)
 				}
 			}
+			mu.Lock()
+			ts.audio++
+			mu.Unlock()
 			offset := ts.place.Place(f.QPC100ns, f.DevicePos)
 			if err := ts.writer.WriteAt(offset, samples, f.Flags); err != nil {
 				runErr = err

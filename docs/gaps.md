@@ -190,9 +190,17 @@ The helper had already said so. `recorder.log` line 5:
 
     track mic ended after 0 audio frames
 
-Nothing consumed it. The check is now asked of both tracks, and a lost
-microphone gets its own banner above the withheld notice and its own line in
-the brief — because unlike every other disclosure here, **the labels are not
+Nothing consumed it.
+
+Fixed in two halves, because the two matter at different times. **During the
+meeting**, a declared track that has delivered nothing for 60 seconds raises a
+desktop notification naming it — the only moment anybody can still fix it. That
+threshold is not a diagnosis: a loopback stream delivers nothing while the
+render endpoint is idle, and it is idle at the start of every recording, so the
+wording reports what was measured rather than concluding from it.
+
+**Afterwards**, the check is asked of both tracks, and a lost microphone gets
+its own banner above the withheld notice and its own line in the brief — because unlike every other disclosure here, **the labels are not
 wrong**. What is wrong is that half the conversation is missing, and correct
 labels on half a meeting look exactly like a complete one.
 
@@ -509,18 +517,13 @@ not survive, and every suppressed line is kept with the reason it went.
 
 What is left:
 
-1. **A live check that each track is still producing audio.** Promoted to the
-   top by evidence rather than argument: on 2026-08-27 the microphone delivered
-   zero frames for forty-four minutes, and the first thing that noticed was a
-   human reading a manifest two days later. The disclosure now added is a
-   consolation prize — it tells you afterwards that the meeting is half
-   recorded. The supervisor already sees the frame counts as they arrive, and
-   a track at zero after the first thirty seconds is not a judgment call.
-   Preflight would not have caught this one either: the device opened fine and
-   reported its name and sample rate. **The check has to run during, not
-   before.**
+1. ~~**A live check that each track is still producing audio.**~~ **Done.** A
+   declared track that has delivered nothing after 60 seconds raises a desktop
+   notification naming the track, while the meeting is still happening and
+   somebody can still fix it. It notifies rather than logs, because the log is
+   where the helper's own report of this sat unread for two days.
 2. **A desktop indicator on Windows**, where the meeting actually happens. The
-   marker file and the notification help; neither is on screen. Item 1 gives it
+   marker file and the notifications help; neither is on screen. Item 1 gave it
    something worth showing.
 3. **`minutes config`.** Hand-written JSON, no validation, and now with rather
    more in it.

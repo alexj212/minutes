@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/alexj/minutes/internal/frame"
 	"github.com/alexj/minutes/internal/manifest"
@@ -236,5 +238,81 @@ func TestHelperRunsInItsOwnProcessGroup(t *testing.T) {
 	if helperPGID == ourPGID {
 		t.Errorf("the helper shares our process group (%d), so a terminal Ctrl-C would "+
 			"kill it mid-write and the recording would be reported as failed", helperPGID)
+	}
+}
+
+// liveHelper emits the given bytes and then stays alive, so a watcher that
+// only matters while a recording is running has something to watch.
+func liveHelper(t *testing.T, stdout []byte, hold string) string {
+	t.Helper()
+	dir := t.TempDir()
+	data := filepath.Join(dir, "frames.bin")
+	if err := os.WriteFile(data, stdout, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "helper")
+	body := fmt.Sprintf("#!/bin/sh\ncat %q\nsleep %s\n", data, hold)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// A track that has been declared and delivers nothing has to be reported while
+// the meeting is still happening, because that is the only time anybody can
+// still fix it.
+//
+// On 2026-08-27 a 44-minute standup captured 8 segments of system audio and
+// zero microphone frames. The helper wrote "track mic ended after 0 audio
+// frames" into a log, the recording was transcribed and delivered with one side
+// of the conversation missing, and nobody noticed for two days.
+//
+// Both tracks are exercised in ONE run, deliberately. A test that only checked
+// the silent track would pass just as happily if the watcher reported every
+// track, and a watcher that fires on everything is as useless as one that fires
+// on nothing — it just fails in the opposite direction. What has to be true is
+// that it tells them apart.
+func TestATrackDeliveringNothingIsReportedWhileRecording(t *testing.T) {
+	var out []byte
+	out = append(out, buildFrame(frame.TypeTrackInfo, frame.TrackMic, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Some Microphone"))...)
+	out = append(out, buildFrame(frame.TypeTrackInfo, frame.TrackSystem, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Some Speakers"))...)
+	// Only the system track ever delivers audio. The microphone is declared and
+	// silent, which is exactly the 2026-08-27 shape.
+	out = append(out, buildFrame(frame.TypeAudio, frame.TrackSystem, 10_000_000, 0, 0, pcm16(480))...)
+
+	var mu sync.Mutex
+	reported := map[string]time.Duration{}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := Run(ctx, Options{
+		Helper:       liveHelper(t, out, "1"),
+		Manifest:     newManifest(t),
+		NoAudioAfter: 100 * time.Millisecond,
+		OnNoAudio: func(track string, since time.Duration) {
+			mu.Lock()
+			defer mu.Unlock()
+			reported[track] = since
+		},
+	})
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if _, ok := reported["mic"]; !ok {
+		t.Error("a declared track that delivered nothing was never reported")
+	}
+	if _, ok := reported["system"]; ok {
+		t.Error("a track that delivered audio was reported as silent")
+	}
+	if len(reported) != 1 {
+		t.Errorf("reported %v, want exactly the mic", reported)
+	}
+	if d := reported["mic"]; d < 100*time.Millisecond {
+		t.Errorf("reported after %s, before the threshold had elapsed", d)
 	}
 }

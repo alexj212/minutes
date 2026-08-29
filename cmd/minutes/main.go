@@ -462,6 +462,29 @@ func cmdStart(args []string) int {
 // announce says out loud that a recording has started, beyond the terminal that
 // started it: a marker file anything can read, and a notification if the agent
 // is there. Both are best effort — neither is a reason not to record.
+// noAudio reports a track that has been declared and has delivered nothing.
+//
+// It notifies rather than logs. A supervised recording's log is a file, and
+// that is where the helper's own "track mic ended after 0 audio frames" sat
+// unread while a 44-minute meeting was transcribed and delivered with one side
+// of the conversation missing. The whole value of noticing this during the
+// meeting is that somebody can still fix it, which requires telling somebody.
+//
+// The wording states what was measured rather than diagnosing it. Nothing on a
+// track can mean the meeting has not started yet — a loopback stream is silent
+// until something plays — and a false alarm that says "nothing has arrived" is
+// cheap, where one that says "your microphone is broken" is not.
+func noAudio(m *manifest.Manifest, track string, since time.Duration) {
+	body := fmt.Sprintf("Nothing has been captured from the %s track in %s of %q. "+
+		"If the meeting has started, that track is not recording — everything on it "+
+		"will be missing from the transcript.", track, since.Round(time.Second), m.Name)
+	fmt.Printf("  ⚠ no audio on the %s track after %s — if the meeting has started, "+
+		"it is not being recorded\n", track, since.Round(time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = deliver.New().Notify(ctx, "Recording is missing a track", body, "minutes")
+}
+
 func announce(m *manifest.Manifest) {
 	if err := session.SetMarker(session.Marker{
 		ID: m.ID, Name: m.Name, Dir: m.Dir(), PID: os.Getpid(), StartedAt: m.StartedAt,
@@ -925,7 +948,8 @@ func cmdRecord(args []string) int {
 
 	runErr := capture.Run(ctx, capture.Options{
 		Helper: helper, Manifest: m, Duration: *dur, AppPID: target.PID,
-		Log: func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) },
+		Log:       func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) },
+		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
 	})
 	if err := m.Finish(runErr); err != nil {
 		fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
@@ -1253,7 +1277,8 @@ func cmdSupervise(args []string) int {
 	announce(m)
 	runErr := capture.Run(ctx, capture.Options{
 		Helper: *helper, Manifest: m, AppPID: *appPID,
-		Log: func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
+		Log:       func(f string, a ...any) { fmt.Printf(f+"\n", a...) },
+		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
 	})
 	// Capture has ended, whatever happens next. The marker must go now rather
 	// than after transcription, or the machine keeps claiming to be recording
