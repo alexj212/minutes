@@ -127,6 +127,21 @@ see a recording is happening without being told. If it fails to start, the
 recording continues and says so; do not treat that as a reason to stop, and do
 not suggest disabling it.
 
+### If a track stops producing audio
+
+Sixty seconds in, a track that has delivered nothing raises a notification:
+
+    ⚠ no audio on the mic track after 1m0s — if the meeting has started,
+      it is not being recorded
+
+**Tell the user immediately.** It is a measurement, not a diagnosis: a loopback
+stream delivers nothing while the render endpoint is idle, so seeing it for the
+`system` track before the call starts is normal. Seeing it once the meeting is
+under way means that track is not recording and everything on it will be absent.
+
+This exists because a real 44-minute standup recorded zero microphone frames and
+nobody noticed for two days.
+
 ## Delivering — this is a judgment call, and not the tool's
 
 A recording bound for **this machine's own core session** is delivered
@@ -153,6 +168,20 @@ the recording directory and the command exits zero. That is expected, not a
 failure — say so and move on. A `429` is the coordinator's loop guard; notes go
 out once per meeting, so hitting it means something is sending in a loop. Do not
 retry — find the loop.
+
+### A refused delivery is final, not queued
+
+If `deliver` reports the destination is unknown, **the message was not queued and
+will not arrive later.** The coordinator only routes to destinations it has
+already seen; a project nobody has opened is refused at send time and nothing is
+kept for it. The brief is written to `delivery.md` in the recording directory and
+nothing is lost — but do not tell the user it was sent.
+
+`shaba folders` lists what is addressable. Adding a folder to the boot list makes
+it addressable before it has ever been opened.
+
+An unreachable agent is different and transient: same fallback, and retrying
+later is reasonable.
 
 ## Writing the notes when a brief arrives
 

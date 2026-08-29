@@ -106,3 +106,34 @@ Track 0 is the microphone and track 1 is the system. They are never summed.
 Mixing is irreversible, and keeping them apart makes speaker attribution free —
 your track is you, the other track is everyone else — which is worth more than
 any diarization model.
+
+---
+
+## The tray helper's protocol
+
+`minutes-tray` is a second helper with its own, much smaller contract. It is
+line-based rather than framed: there is no audio, no timestamps, and nothing
+that would be unrecoverable if thrown away.
+
+**Helper to orchestrator**, one line each, unbuffered:
+
+    READY     the icon is in the tray
+    STOP      the operator asked for the recording to end
+
+`STOP` is a request, never an action. The tray does not stop anything itself —
+deciding to stop is the operator's and carrying it out belongs to the
+orchestrator, which owns the recording and its manifest. A tray that killed the
+capture helper would produce exactly the half-written recording this protocol's
+framing exists to avoid.
+
+**Orchestrator to helper:** nothing is sent today. The helper reads and discards
+its stdin so that a future message cannot wedge a writer against a full pipe.
+
+**Shutdown** is the same contract as the capture helper: closing stdin asks it to
+go, which lets it take its own icon out of the tray on the way past. A killed
+tray leaves a dead icon that only disappears when somebody hovers over it. The
+pipe closes when the orchestrator exits, so nothing is ever orphaned.
+
+**Exit status** is zero on a clean shutdown. It exits non-zero without printing
+`READY` if the shell refuses the icon, because the orchestrator says the
+indicator is up and must not say that when it is not.

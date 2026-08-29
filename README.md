@@ -13,6 +13,11 @@ proven on the target Mac.
 - **[docs/protocol.md](docs/protocol.md)** — the wire format between the helper and the orchestrator.
 - **[CLAUDE.md](CLAUDE.md)** — what this is, and why it is a worker rather than a tray application.
 
+On Windows a **red dot sits in the tray** for the length of the recording —
+right click for the meeting, the elapsed time, **Stop recording** and **Open
+folder**. Stopping asks the orchestrator rather than killing anything, so there
+is one path to ending a recording however it was asked for.
+
 Two things to know before recording a meeting that matters, both in
 [gaps.md](docs/gaps.md):
 
@@ -339,12 +344,14 @@ numbers below were measured on the target machines, not estimated:
 | Transcription | **7.4x real time** on an RTX 2080 SUPER with whisper `small` |
 | Disk | **1.33 GB/hour** for both tracks |
 | Crash cost | one sync interval, ≤5 s — verified with `SIGKILL` |
+| Segment rotation | exact on macOS too, at both rates, zero re-anchors over 12 minutes |
+| Echo suppression | genuine speech shares a five-word run with the far end **zero times** in 700+ real lines |
 
 See [docs/status.md](docs/status.md) for the full picture, including what is
 proven against real hardware and what is still taken on trust.
 
 ## Next
 
-Native Linux capture, and the items in [docs/gaps.md](docs/gaps.md) — a desktop
-indicator where the meeting actually happens, a level check before recording
-rather than after, and `minutes config`.
+Native Linux capture, a macOS status item, and the items in
+[docs/gaps.md](docs/gaps.md) — chiefly background room audio, which `--app`
+cannot remove because it is in the room rather than on the machine.
