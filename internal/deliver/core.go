@@ -1,8 +1,11 @@
 package deliver
 
 import (
-	"os"
-	"path/filepath"
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"time"
 )
 
 // Finding this node's own session.
@@ -14,50 +17,74 @@ import (
 // judgment — it is just made by a session with a person behind it, rather than
 // by whoever remembered to type a project name.
 //
-// That distinction is what makes an automatic delivery safe. Sending to this
-// node's core session is not publishing; sending to another project is.
+// This used to infer the answer from shabadoo's on-disk layout: the node
+// directory beside the socket, identified first by being the only one and then
+// by holding a CLAUDE.md. Both were wrong in the same way. The layout was never
+// an interface, and the first version broke four days after it was written when
+// an unrelated `mcp/` directory appeared beside the node directories — the
+// count went from one to two and this silently began returning nothing, with no
+// error and automatic delivery quietly addressed nowhere.
 //
-// The agent socket cannot answer "who is core here" — its allowlist carries the
-// messaging endpoints and nothing else — so this reads the node directory
-// shabadoo keeps beside the socket.
+// The agent socket now answers the question directly. Asking is not merely
+// tidier: the id it returns is derived through the same window name the
+// launcher injects, rather than computed a second way, and two derivations of
+// an address drift into mail addressed to a session that does not exist.
+
+// whoami is the part of the agent's answer this program needs.
 //
-// Counting directories is what this used to do, and it broke four days after it
-// was written: shabadoo created an unrelated `mcp/` state directory beside the
-// node directories, the count went from one to two, and CoreSession silently
-// began returning nothing. Nothing failed. Automatic delivery just had no
-// destination any more, which is the quiet kind of break — the recording is
-// still made and still stored, and the notes simply never go anywhere.
-//
-// So a node directory is now identified by what makes it one rather than by
-// being the only one: it is a core session's working directory, and it holds
-// that session's CLAUDE.md. This is still inference about somebody else's
-// layout, and it is still the wrong way to answer the question. The right way
-// is a /whoami on the agent socket, which has been asked for. Until that
-// exists, being specific is at least better than counting.
-func CoreSession() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	root := filepath.Join(home, ".config", "shabadoo")
-	entries, err := os.ReadDir(root)
-	if err != nil {
-		return ""
-	}
-	var found string
-	for _, e := range entries {
-		if !e.IsDir() {
-			continue
-		}
-		if _, err := os.Stat(filepath.Join(root, e.Name(), "CLAUDE.md")); err != nil {
-			continue
-		}
-		if found != "" {
-			// More than one node configured here. Guessing which is ours would
-			// mean guessing where a meeting goes.
-			return ""
-		}
-		found = e.Name()
-	}
-	return found
+// CoreSession is a pointer because absent and empty are different answers. The
+// field is omitted when the agent cannot determine a core session, and present
+// but empty would mean this host has none — collapsing those is exactly how the
+// delivery default went quietly nowhere the first time.
+type whoami struct {
+	Node        string  `json:"node"`
+	CoreSession *string `json:"core_session"`
+	CorePath    string  `json:"core_path"`
 }
+
+// CoreSession names this machine's own session, or empty when there is no
+// answer to be had.
+func CoreSession() string {
+	c := New()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://local/whoami", nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
+	if err != nil {
+		return ""
+	}
+	var w whoami
+	if err := json.Unmarshal(body, &w); err != nil {
+		return ""
+	}
+	if w.CoreSession == nil {
+		// The agent could not determine one. Not the same as this host having
+		// none, and neither is a destination to deliver a meeting to.
+		return ""
+	}
+	return *w.CoreSession
+}
+
+// A note on what comes back. The agent returns a session *id*
+// ("claude-wsl-1df88a1a"), not the alias ("wsl"), and the id does not appear in
+// the list of known recipients a refusal prints — which made it look
+// unaddressable. Measured against the live agent: it is. POST /message/send to
+// the raw id returns 200.
+//
+// It matters that this is resolved at the moment of delivery rather than
+// stored. An alias survives a session restart and an id may not, so a config
+// that had written one down could address a session that no longer exists.
+// Nothing writes it down unless somebody runs `minutes config set`, and the
+// default is computed fresh every time.

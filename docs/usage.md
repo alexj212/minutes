@@ -472,6 +472,21 @@ to open it means already being you.
 
 ---
 
+### When delivery does not happen
+
+Two failures, one behaviour: the brief is written to `delivery.md` in the
+recording directory, the manifest records the delivery as degraded, and the
+command exits zero because nothing was lost.
+
+- **The agent is unreachable.** Transient. A recorder that lost a meeting
+  because a coordinator blipped would be worse than one that never integrated.
+- **The destination is unknown.** *Final.* The coordinator routes only to
+  destinations it has already seen — a project in its node's startable folder
+  list. One that has never been opened is refused at send time and **nothing is
+  queued for it**; it will not arrive when somebody starts that session later.
+  `shaba folders` lists what is addressable, and adding a folder to the boot
+  list makes it addressable before it has ever run.
+
 ## A whole meeting, start to finish
 
 ```

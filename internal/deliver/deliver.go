@@ -43,6 +43,28 @@ func SocketPath() string {
 // no is telling you something.
 var ErrUnreachable = errors.New("no shabadoo agent on this host")
 
+// ErrUnknownDestination means the coordinator has never seen that recipient and
+// refused to take the message.
+//
+// This is the important one, because it was documented as the opposite.
+// shabadoo's own CLAUDE.md said mail for a project that is not running is
+// stored against the id it would have and drains when it starts, and this
+// program was built with no fallback on the strength of that sentence. It is
+// only half true: a project the coordinator has *seen* — in its node's
+// startable folder list — queues correctly, and one it has never seen is
+// refused at send time and nothing is kept. Running-or-not was never the line.
+//
+// So a refusal is final. It is not queued, not waiting, and not going to arrive
+// when somebody opens that project. Treating it as a transient failure would
+// leave a meeting addressed to nobody with the operator told it was sent.
+//
+// Measured against the live agent rather than assumed: HTTP 400, body
+// "no session matches that recipient: ... (known: ...)". Matching the text is
+// not lovely, but a 400 on this route can also be a malformed body, which is
+// this program's bug rather than the operator's, and those two must not be
+// reported as the same thing.
+var ErrUnknownDestination = errors.New("the coordinator has never seen that destination")
+
 // ErrThrottled means the coordinator refused because this session has sent too
 // much. It is a loop guard, and a recorder should never approach it: notes go
 // out once per meeting.
@@ -91,6 +113,12 @@ func (c *Client) post(ctx context.Context, route string, body any) error {
 
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return fmt.Errorf("%w: %s", ErrThrottled, strings.TrimSpace(string(out)))
+	}
+	if resp.StatusCode == http.StatusBadRequest && strings.Contains(string(out), "no session matches") {
+		// The body carries the list of destinations that do exist, which is the
+		// useful half of the refusal, so it is passed through rather than
+		// summarised away.
+		return fmt.Errorf("%w: %s", ErrUnknownDestination, strings.TrimSpace(string(out)))
 	}
 	if resp.StatusCode >= 400 {
 		return fmt.Errorf("POST %s: %s: %s", route, resp.Status, strings.TrimSpace(string(out)))

@@ -371,3 +371,40 @@ func TestBriefDoesNotSplitLinesItCannotAttribute(t *testing.T) {
 		t.Errorf("brief does not say the recording cannot attribute:\n%s", unattributed)
 	}
 }
+
+// A destination the coordinator has never seen is refused at send time and
+// nothing is kept. That is final, not transient — the message is not queued and
+// will not arrive when somebody opens that project.
+//
+// This program was built with no fallback for it, because shabadoo's own
+// documentation said mail for a project that is not running is stored and
+// drains at startup. Only half true: a project the coordinator has *seen*
+// queues, one it has never seen bounces. Running-or-not was never the line.
+//
+// Asserted as a pair, because the refusal is recognised by matching text. A 400
+// that is this program sending a malformed body must NOT be reported as the
+// operator naming a project that does not exist — they need opposite responses,
+// and a matcher that claims every 400 looks identical to a correct one from the
+// only example anybody usually writes.
+func TestAnUnknownDestinationIsFinalAndAMalformedRequestIsNot(t *testing.T) {
+	cases := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{"unknown recipient", `no session matches that recipient: "nope" (known: wsl, mac)`, true},
+		{"our own bad request", `bad request: json: unknown field "to"`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			startFakeAgent(t, http.StatusBadRequest, tc.body)
+			err := New().Send(context.Background(), Message{To: "somewhere", Title: "t", Body: "b"})
+			if err == nil {
+				t.Fatal("a 400 was reported as a successful delivery")
+			}
+			if got := errors.Is(err, ErrUnknownDestination); got != tc.want {
+				t.Errorf("ErrUnknownDestination = %v, want %v (err: %v)", got, tc.want, err)
+			}
+		})
+	}
+}

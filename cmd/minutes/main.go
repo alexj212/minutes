@@ -1232,19 +1232,33 @@ func cmdDeliver(args []string) int {
 		To: target, From: *from, Tag: "minutes", Title: title, Body: body,
 	})
 
-	if errors.Is(err, deliver.ErrUnreachable) {
-		// Degrade rather than fail. A recorder that lost a meeting because a
-		// coordinator blipped would be worse than one that never integrated at
-		// all; the notes are on disk either way.
+	// Two different failures, one behaviour: keep the brief on disk and say so.
+	//
+	// An unreachable agent is transient — a coordinator blipped, and a recorder
+	// that lost a meeting over that would be worse than one that never
+	// integrated. An unknown destination is the opposite: it is final. The
+	// message is not queued and will not arrive when somebody opens that
+	// project, because the coordinator only routes to destinations it has
+	// already seen. Either way the notes must not evaporate, and either way the
+	// operator must not be told they were sent.
+	if errors.Is(err, deliver.ErrUnreachable) || errors.Is(err, deliver.ErrUnknownDestination) {
 		path := filepath.Join(dir, "delivery.md")
 		if werr := os.WriteFile(path, []byte("# "+title+"\n\n"+body), 0o644); werr != nil {
-			fmt.Fprintf(os.Stderr, "agent unreachable, and writing the brief failed too: %v\n", werr)
+			fmt.Fprintf(os.Stderr, "delivery failed, and writing the brief failed too: %v\n", werr)
 			return 1
 		}
 		if serr := m.SetDelivery(manifest.DeliveryRecord{To: target, At: time.Now(), Degraded: true}); serr != nil {
 			fmt.Fprintf(os.Stderr, "recording the delivery: %v\n", serr)
 		}
-		fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
+		if errors.Is(err, deliver.ErrUnknownDestination) {
+			fmt.Printf("  %q is not a destination this coordinator knows, so nothing was sent.\n", target)
+			fmt.Printf("  this is final rather than queued: a project it has never seen is refused\n")
+			fmt.Printf("  at send time and nothing is kept for it. %v\n", err)
+			fmt.Printf("  `shaba folders` lists what is addressable; adding the folder to the boot\n")
+			fmt.Printf("  list makes it addressable before it has ever been opened.\n")
+		} else {
+			fmt.Printf("  the shabadoo agent is not reachable, so nothing was delivered.\n")
+		}
 		fmt.Printf("  the brief is on disk and nothing was lost:\n    %s\n", path)
 		return 0
 	}

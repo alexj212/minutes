@@ -490,13 +490,23 @@ proven — see below — and what it exposed is listed as a gap of its own.*
   11 s. openai-whisper's MPS support has historically been unreliable, so this
   is listed rather than defaulted: it needs measuring before it is believed,
   which is the same rule the rest of this file follows.
-- **That a message to a session which is not running is delivered when it
-  starts.** `deliver` has no fallback for that case because shabadoo's
-  `CLAUDE.md` states mail is stored against the id a project would have and
-  drains at startup. That claim is load-bearing here and this project has never
-  tested it. If it is wrong, the failure is the quiet kind: the file is written,
-  the operator is told it was sent, and nobody reads it. Asked of `wsl`
-  2026-08-28.
+- ~~**That a message to a session which is not running is delivered when it
+  starts.**~~ **Answered, and it was false.** The line was never
+  running-or-not. A project the coordinator has *seen* — in its node's
+  startable folder list — queues correctly; one it has **never been opened**
+  is refused at send time and nothing is kept. `deliver` had no fallback for
+  that case, because it was built on the sentence in shabadoo's `CLAUDE.md`
+  saying otherwise.
+
+  Worth recording how it was found, because it is this project's own rule
+  biting somebody else. shabadoo first verified the claim by sending to a
+  closed-but-known project, getting `deferred: true`, and reporting the general
+  statement as confirmed — the single-sided fixture, in a check of a claim
+  another project had flagged as load-bearing in shipped code. `runner` simply
+  tried the other case and it bounced.
+
+  A refusal now falls back to writing `delivery.md`, the same as an unreachable
+  agent, and says the destination is unknown rather than reporting a send.
 
 ---
 
