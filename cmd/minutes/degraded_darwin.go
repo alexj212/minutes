@@ -12,14 +12,20 @@ import (
 // helperDegraded reports why this helper works here but will not work as well
 // on the machine that installs it.
 //
-// On macOS the answer is about signing, and it is not cosmetic. TCC attaches
-// its audio-capture decision to the binary's designated requirement. An
-// unsigned binary gets an ad-hoc signature whose requirement is a bare cdhash
-// — a hash of the bytes — so it matches only that exact copy, and the operator
-// is asked for permission again after every rebuild. A real identity gives a
-// requirement naming the identifier and the certificate, which does not move
-// when the code does. Measured: a change that moved the cdhash from 64589417…
-// to 384c54f5… left the requirement byte-identical, and the grant survived.
+// On macOS the answer is about signing, and it is about identity rather than
+// consent. An unsigned binary gets an ad-hoc signature whose designated
+// requirement is a bare cdhash — a hash of the bytes — which names nothing a
+// recipient can resolve and which Gatekeeper may refuse on a Mac that
+// downloaded it. A real identity gives a requirement naming the identifier and
+// the certificate, and that requirement survives a rebuild: a change that
+// moved the cdhash from 64589417… to 384c54f5… left it byte-identical.
+//
+// It does NOT govern whether macOS asks for recording permission. TCC keys
+// that on the responsible process — whatever launched this — and the helper is
+// only ever the accessing process. Measured back to back in one session: a
+// signed helper prompts zero times and an ad-hoc one prompts zero times. This
+// comment said otherwise for two days, from a correlation whose real cause was
+// the launcher being rebuilt.
 //
 // So an ad-hoc helper is `present: true`, correct, checksummed and complete,
 // and still costs whoever installs it a permission prompt they cannot avoid.

@@ -69,9 +69,25 @@ mkdir -p "$root/dist"
 identifier="com.github.alexj212.minutes-capture"
 
 identity="${MINUTES_CODESIGN_IDENTITY:-}"
+lookup_failed=""
 if [ -z "$identity" ]; then
-    identity="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null \
-        | /usr/bin/awk 'NR==1 && /\)/ { print $2 }')"
+    # `|| true` is load-bearing. Under `set -euo pipefail` a non-zero exit from
+    # security — a locked keychain, the tool absent, a sandbox that refuses it —
+    # propagates through the pipe and kills this assignment, aborting the build
+    # with exit 1 and no output at all. The ad-hoc fallback below then never
+    # runs, so the documented behaviour for a machine without an identity
+    # silently did not happen on a machine that could not be asked.
+    #
+    # Measured: replacing security with a command that exits non-zero produced
+    # exit 1 and zero lines of output; replacing it with one that succeeds and
+    # prints nothing produced the fallback and its warning, correctly.
+    if identity="$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null \
+        | /usr/bin/awk 'NR==1 && /\)/ { print $2 }')"; then
+        :
+    else
+        identity=""
+        lookup_failed=yes
+    fi
 fi
 
 if [ -n "$identity" ]; then
@@ -85,8 +101,16 @@ else
     /usr/bin/codesign --force --sign - \
         --identifier "$identifier" \
         "$out"
-    echo "signed ad-hoc: no codesigning identity found, so macOS will ask for" >&2
-    echo "audio permission again after every rebuild." >&2
+    if [ -n "$lookup_failed" ]; then
+        echo "signed ad-hoc: could not ask for a codesigning identity — security" >&2
+        echo "find-identity failed. That is not the same as having none, and it" >&2
+        echo "is worth checking before this binary goes anywhere." >&2
+    else
+        echo "signed ad-hoc: no codesigning identity found." >&2
+    fi
+    echo "The binary works here," >&2
+    echo "but names no author anyone can resolve, and a Mac that downloads it" >&2
+    echo "may refuse to run it. It does not affect recording permission." >&2
 fi
 
 echo "built $out"
