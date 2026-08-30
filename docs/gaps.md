@@ -396,6 +396,53 @@ transcript header and the brief both say the recording captured one source and
 cannot say who spoke. What was missing was the chance to know *before* the
 meeting.
 
+**And the fix shipped with the same defect it was fixing.** Both microphone
+refusals `return` as soon as they decide, and the system probe sat after them —
+so `carrying signal` was **unreachable whenever the microphone was broken**,
+which is the one situation where an operator most wants to know whether
+anything still works. Found by minutes-mac within an hour, and only because
+their microphone is denied: from a machine with a working one the branch looks
+covered, and every test I wrote exercised it that way.
+
+Both probes now run before anything decides. It costs about two seconds on a
+path that is already refusing, which is the right trade — *a refusal that names
+what does still work is a different message from one that only says no*, and
+the refusal text now carries the far end's state.
+
+The generalisation, since this is twice in two days: **a branch is only as
+tested as the machine the tests run on.** Mine could not reach the interesting
+state, and no amount of care in writing them would have changed that. It took a
+second machine in a different condition.
+
+### ~~The advice for a dead microphone named a remedy that does not always exist~~ — fixed
+
+Preflight told every operator with a constant microphone to open System
+Settings > Privacy & Security > Microphone and enable it. On at least one
+machine that is a dead end, and the text was confident.
+
+**macOS can refuse to *ask*.** When the responsible process is built with the
+hardened runtime and without `com.apple.security.device.audio-input`, no dialog
+is ever raised — so there is nothing to enable, and toggling the entry that is
+there changes nothing. minutes-mac went to TCC's own log rather than reasoning
+about it:
+
+    Prompting policy for hardened runtime; service: kTCCServiceMicrophone
+      requires entitlement com.apple.security.device.audio-input
+      but it is missing for responsible={... shabadoo}
+    Policy disallows prompt ... access to kTCCServiceMicrophone denied
+
+They ruled out our side first, which is what makes it usable: the same helper
+binary signed three ways — hardened with the entitlement, unhardened without,
+and hardened without — delivered 96256 samples, 1 distinct value, all zeros
+every time. **The accessing process's signature is not the lever.**
+
+Nothing in the capture path separates an answered "no" from a forbidden prompt:
+both arrive as a constant signal. So the advice enumerates what it cannot
+distinguish and hands over the `log show` predicate that does distinguish them,
+rather than picking one. **A wrong remedy stated confidently costs more than an
+honest list, because it gets followed.**
+
+
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
 `-999` means "there was no signal to measure" and was printed as

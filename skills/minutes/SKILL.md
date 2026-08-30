@@ -295,7 +295,7 @@ deleting anything unprompted.
 | Platform | State — what is **built**, not what is designed |
 |---|---|
 | **Windows, driven from WSL** | records. WASAPI capture + loopback, helper started over interop |
-| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant once. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it. The grant belongs to **whatever launched the helper**, not to the helper, so it can be revoked by that program updating — signing `minutes-capture` does not protect it |
+| **macOS** | records. HAL audio unit for the microphone, a CoreAudio process tap for system audio. Needs an audio-capture permission grant once. `preflight` **blocks until somebody answers the dialog**, so run it before the meeting rather than at it. The grant belongs to **whatever launched the helper**, not to the helper, so it can be revoked by that program updating — signing `minutes-capture` does not protect it. If that launcher has the hardened runtime without `com.apple.security.device.audio-input`, macOS raises **no dialog at all** and the Microphone pane's toggle does nothing: a launcher defect, not a recorder one |
 | **native Linux desktop** | **refuses.** The PulseAudio path (source + `<sink>.monitor`) is designed and not built |
 | **WSL as the audio source** | **refuses on purpose** — `RDPSink.monitor` carries only audio from Linux apps inside WSL, so a Teams/Zoom/browser meeting never touches it |
 

@@ -218,6 +218,16 @@ microphone returned zeros. **`kTCCServiceAudioCapture` does not carry
 `kTCCServiceMicrophone` with it**, so a machine that has proven it can record
 the far end has proven nothing about recording the operator.
 
+**And macOS can refuse to ask, which is not the same as being denied.** If the
+responsible process carries the hardened runtime without
+`com.apple.security.device.audio-input`, TCC raises no dialog at all: there is
+nothing to enable in System Settings and toggling the entry that is listed
+changes nothing. Measured in TCC's own log, and the helper's signature is not
+the lever — the same binary signed hardened-with-entitlement,
+unhardened-without, and hardened-without all delivered the identical 96256
+zeros. So a launcher's build settings can make this machine uncapturable while
+every one of our own checks reports exactly what it should.
+
 **TCC records the grant against the responsible process, not the helper.** The
 dialog names whatever launched it — here the session coordinator — and
 `minutes-capture` appears nowhere in System Settings. It works, and it discloses

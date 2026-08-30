@@ -387,16 +387,33 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 	// Everything above asked the device whether it would open. This asks
 	// whether anything comes out of it.
 	if res.CanRecord {
+		// BOTH probes run before anything decides, and the order is the point.
+		//
+		// The first version returned on a microphone refusal before the system
+		// track was ever probed, so `carrying signal` was unreachable in
+		// exactly the situation that makes it valuable: an operator whose
+		// microphone is broken learned nothing at all about the far end, at the
+		// moment they most want to know what still works. Found by minutes-mac,
+		// who could see it because their microphone is denied and mine is not —
+		// from here the branch looked covered.
+		//
+		// It costs about two seconds on a path that is already refusing. That
+		// is the right trade: a refusal naming what does still work is a
+		// different message from one that only says no.
+		micV := probeTrack(ctx, helper, frame.TrackMic)
+		res.Mic.Signal = signalOf(micV)
+		// The same measurement on the far end, reported and never enforced.
+		// `system ok` meant "the device opened" and was silent about whether
+		// anything came out of it — and the two are told apart only by whether
+		// something happened to be playing at the time.
+		res.System.Signal = signalOf(probeTrack(ctx, helper, frame.TrackSystem))
+
 		// The two failure modes are kept apart. The operator's action is the
 		// same — a permission or a cable — but the evidence differs, and
 		// merging them loses the ability to say which was seen.
-		const advice = "\n\n  On macOS check System Settings > Privacy & Security > Microphone.\n" +
-			"  A denied microphone there is not an error the recorder can see: it opens,\n" +
-			"  it starts, and every call returns success.\n\n" +
-			"  Recording now would capture the far end and none of you."
-		switch v := probeTrack(ctx, helper, frame.TrackMic); v {
+		advice := micAdvice(res.Platform, res.System.Signal)
+		switch micV {
 		case probeConstant:
-			res.Mic.Signal = SignalConstant
 			res.CanRecord = false
 			res.Mic.OK = false
 			res.Mic.Error = "delivered an unvarying signal"
@@ -406,7 +423,6 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 				"  switch, or a dead cable. It is not a quiet room." + advice
 			return res, nil
 		case probeNoPackets:
-			res.Mic.Signal = SignalNone
 			res.CanRecord = false
 			res.Mic.OK = false
 			res.Mic.Error = "declared a track and delivered no audio at all"
@@ -417,15 +433,7 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 				"  first packet well inside the probe window, so this is not one that was\n" +
 				"  slow to start." + advice
 			return res, nil
-		default:
-			res.Mic.Signal = signalOf(v)
 		}
-
-		// The same measurement on the far end, reported and never enforced.
-		// `system ok` meant "the device opened" and was silent about whether
-		// anything came out of it — and the two are told apart only by whether
-		// something happened to be playing at the time.
-		res.System.Signal = signalOf(probeTrack(ctx, helper, frame.TrackSystem))
 	}
 
 	if !res.CanRecord {
@@ -555,6 +563,52 @@ const (
 	// it yet.
 	probeNoPackets
 )
+
+// micAdvice is what to do about a microphone that opens and captures nothing.
+//
+// It used to assert one remedy — open the Microphone pane and enable it — and
+// on at least one machine that sends the operator to a pane where the fix does
+// not exist. macOS can refuse to *ask*: when the responsible process is built
+// with the hardened runtime and without `com.apple.security.device.audio-input`,
+// no dialog is ever raised, so there is nothing to enable and toggling the entry
+// that is there changes nothing. Measured by minutes-mac in TCC's own log,
+// against a launcher that had shipped that way the same day.
+//
+// Nothing in the capture path can tell the two causes apart: an answered "no"
+// and a forbidden prompt both arrive as a constant signal. So this enumerates
+// what it cannot distinguish and hands over the command that does distinguish
+// them, rather than naming one confidently. A wrong remedy stated with
+// confidence costs more than an honest list, because it is followed.
+func micAdvice(platform string, farEnd Signal) string {
+	var b strings.Builder
+	b.WriteString("\n\n  Recording now would capture ")
+	switch farEnd {
+	case SignalCarrying:
+		// Worth saying plainly. It is the difference between "the machine is
+		// broken" and "one device is", and it is what the operator would
+		// otherwise go and find out for themselves.
+		b.WriteString("the far end — which was probed and is\n  carrying audio — and none of you.")
+	case SignalNone:
+		b.WriteString("the far end and none of you. Nothing was\n" +
+			"  playing during the probe, so whether the far end works is not established.")
+	default:
+		b.WriteString("the far end and none of you.")
+	}
+	if platform != "macos" {
+		return b.String()
+	}
+	b.WriteString("\n\n  Start at System Settings > Privacy & Security > Microphone, and enable\n" +
+		"  whatever launched this — the grant belongs to the launcher, not to\n" +
+		"  minutes-capture, which appears nowhere in that pane.\n\n" +
+		"  If it is listed there and enabling it changes nothing, macOS is refusing\n" +
+		"  to ask: a launcher with the hardened runtime and no\n" +
+		"  com.apple.security.device.audio-input entitlement gets no dialog, so the\n" +
+		"  toggle has nothing behind it. That is a defect in the launcher, not here.\n" +
+		"  TCC says which it is:\n\n" +
+		"    log show --last 5m --predicate 'subsystem == \"com.apple.TCC\"' \\\n" +
+		"      | grep -i microphone")
+	return b.String()
+}
 
 // signalOf translates a probe verdict into what it established.
 //

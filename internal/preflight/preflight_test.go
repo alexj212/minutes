@@ -524,3 +524,81 @@ func TestAnIdleSystemTrackIsReportedAndNeverRefused(t *testing.T) {
 		t.Errorf("System.Signal = %q with audio flowing, want %q", res.System.Signal, SignalCarrying)
 	}
 }
+
+// A refusal has to say what still works, and the first version of this could
+// not: both microphone refusals returned before the system track was ever
+// probed, so `carrying signal` was unreachable in exactly the case that makes
+// it valuable.
+//
+// Found by minutes-mac, whose microphone is denied. From a machine with a
+// working one the branch looks covered, which is the whole reason it shipped.
+func TestARefusedMicrophoneStillReportsTheFarEnd(t *testing.T) {
+	if !IsWSL() || !InteropEnabled() {
+		t.Skip("Run()'s helper path under test only applies on a WSL host with interop")
+	}
+	const report = `{
+  "platform": "windows",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "wasapi-capture", "device": "Mic", "sampleRate": 48000, "channels": 1, "bitsPerSample": 16, "formatTag": 1},
+    "system": {"ok": true, "mode": "wasapi-loopback", "device": "Speakers", "sampleRate": 44100, "channels": 2, "bitsPerSample": 32, "formatTag": 3}
+  },
+  "ok": true
+}`
+	const (
+		typTrackInfo = 1
+		typAudio     = 2
+	)
+	deadMic := append(append([]byte{}, frameBytes(typTrackInfo, 0, micTrackInfo())...),
+		frameBytes(typAudio, 0, pcm(0, 0, 0, 0, 0))...)
+	liveSys := append(append([]byte{}, frameBytes(typTrackInfo, 1, micTrackInfo())...),
+		frameBytes(typAudio, 1, pcm(7, -3, 9, 2))...)
+
+	t.Setenv("MINUTES_HELPER", dispatchHelper(t, report, deadMic, liveSys))
+	res, err := Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.CanRecord {
+		t.Fatal("a constant microphone was allowed to record")
+	}
+	// The assertion that fails if the probes go back the other way round.
+	if res.System.Signal != SignalCarrying {
+		t.Errorf("System.Signal = %q on a mic refusal, want %q — the far end was "+
+			"never probed, so the operator learns nothing about what still works "+
+			"at the moment they most need to know", res.System.Signal, SignalCarrying)
+	}
+	if !strings.Contains(res.Refusal, "carrying audio") {
+		t.Errorf("the refusal does not say the far end works:\n%s", res.Refusal)
+	}
+}
+
+// The remedy used to be asserted, and on at least one machine it was wrong.
+//
+// macOS can refuse to *ask* for the microphone — a responsible process with the
+// hardened runtime and no com.apple.security.device.audio-input entitlement
+// raises no dialog, so the Microphone pane has nothing behind its toggle.
+// Nothing in the capture path separates that from an answered "no": both arrive
+// as a constant signal. So the text must enumerate rather than pick.
+func TestMicAdviceDoesNotAssertARemedyItCannotVerify(t *testing.T) {
+	got := micAdvice("macos", SignalCarrying)
+	for _, want := range []string{
+		"Privacy & Security > Microphone", // the common case, still first
+		"changes nothing",                 // and the case where that pane is a dead end
+		"hardened runtime",
+		"com.apple.TCC", // the command that actually tells them apart
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("advice is missing %q — it names one cause confidently:\n%s", want, got)
+		}
+	}
+	// Not on Windows, where none of it applies.
+	if win := micAdvice("windows", SignalCarrying); strings.Contains(win, "System Settings") {
+		t.Errorf("macOS advice is printed on Windows:\n%s", win)
+	}
+	// And the far end's state is carried into it, differently for each answer.
+	a, b := micAdvice("windows", SignalCarrying), micAdvice("windows", SignalNone)
+	if a == b {
+		t.Error("a far end that was probed and carries audio reads the same as one " +
+			"where nothing was playing — the operator cannot tell what still works")
+	}
+}
