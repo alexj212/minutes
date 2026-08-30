@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alexj/minutes/internal/config"
-	"github.com/alexj/minutes/internal/transcribe"
+	"github.com/alexj212/minutes/internal/config"
+	"github.com/alexj212/minutes/internal/transcribe"
 )
 
 // Editing the config from the command line.

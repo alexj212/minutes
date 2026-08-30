@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 // collector captures the manifest entries a writer emits.

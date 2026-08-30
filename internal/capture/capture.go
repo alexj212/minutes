@@ -18,11 +18,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/alexj/minutes/internal/frame"
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/segment"
-	"github.com/alexj/minutes/internal/timeline"
-	"github.com/alexj/minutes/internal/wav"
+	"github.com/alexj212/minutes/internal/frame"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/segment"
+	"github.com/alexj212/minutes/internal/timeline"
+	"github.com/alexj212/minutes/internal/wav"
 )
 
 // Options configures a recording.

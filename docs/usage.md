@@ -31,8 +31,8 @@ $ minutes version
 minutes v0.5.0
   built    2026-08-28T11:41:02Z
   platform linux/amd64
-  minutes             linux/amd64    /home/alexj/bin/minutes
-  minutes-capture.exe windows/amd64  /home/alexj/bin/minutes-capture.exe
+  minutes             linux/amd64    /home/you/bin/minutes
+  minutes-capture.exe windows/amd64  /home/you/bin/minutes-capture.exe
 ```
 
 An unstamped build reports its commit and whether the tree was dirty, so this
@@ -241,7 +241,7 @@ $ minutes list
   2026-08-25-093012-vendor     stopped        903.0s  334.0MB  —            —
                                vendor call
 
-  2 recording(s), 361.1MB in /home/alexj/minutes
+  2 recording(s), 361.1MB in /home/you/minutes
 ```
 
 `TRANSCRIPT` is `—` until `minutes transcribe` has run, and carries a `↑` if
@@ -255,7 +255,7 @@ While a recording runs, `~/.config/minutes/recording` holds what it is:
 
 ```json
 { "id": "2026-08-25-104604-standup", "name": "standup",
-  "dir": "/home/alexj/minutes/2026-08-25-104604-standup", "pid": 3869780 }
+  "dir": "/home/you/minutes/2026-08-25-104604-standup", "pid": 3869780 }
 ```
 
 It is removed when capture ends — not when transcription ends — and a marker

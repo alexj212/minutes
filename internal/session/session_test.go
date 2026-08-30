@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 func TestNewIDSortsChronologicallyAndSlugsNames(t *testing.T) {

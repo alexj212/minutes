@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 func statusAt(t *testing.T, root, id string, age time.Duration, delivered bool, pid string) Status {

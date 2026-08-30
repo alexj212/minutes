@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/transcript"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/transcript"
 )
 
 // fakeAgent serves a unix socket the way shabadoo's node does, and records what

@@ -16,9 +16,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/transcribe"
-	"github.com/alexj/minutes/internal/wav"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/transcribe"
+	"github.com/alexj212/minutes/internal/wav"
 )
 
 // File names inside a recording directory.

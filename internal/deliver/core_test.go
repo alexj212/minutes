@@ -36,7 +36,7 @@ func fakeWhoami(t *testing.T, status int, body string) {
 // mcp/ directory appeared next to it.
 func TestCoreSessionComesFromTheAgent(t *testing.T) {
 	fakeWhoami(t, http.StatusOK, `{"node":"wsl","core_session":"claude-wsl-1df88a1a",
-		"core_path":"/home/alexj/.config/shabadoo/wsl"}`)
+		"core_path":"/home/you/.config/shabadoo/wsl"}`)
 	if got := CoreSession(); got != "claude-wsl-1df88a1a" {
 		t.Errorf("CoreSession = %q, want the id the agent gave", got)
 	}
@@ -50,7 +50,7 @@ func TestCoreSessionComesFromTheAgent(t *testing.T) {
 // always returns empty passes any test that only knows this one, and returning
 // empty is exactly what the broken version did.
 func TestAnAgentThatCannotSayGivesNoDefault(t *testing.T) {
-	fakeWhoami(t, http.StatusOK, `{"node":"wsl","core_path":"/home/alexj/.config/shabadoo/wsl"}`)
+	fakeWhoami(t, http.StatusOK, `{"node":"wsl","core_path":"/home/you/.config/shabadoo/wsl"}`)
 	if got := CoreSession(); got != "" {
 		t.Errorf("CoreSession = %q; the agent did not name one", got)
 	}

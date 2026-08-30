@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 // Measuring how loud a line was.

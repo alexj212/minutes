@@ -83,7 +83,7 @@ const (
 
 // Frame is one decoded frame.
 type Frame struct {
-	Type Type
+	Type  Type
 	Track Track
 	// QPC100ns is the performance-counter position, in 100-nanosecond units,
 	// at which the endpoint read this packet. Both tracks are stamped from the

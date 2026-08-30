@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/transcript"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/transcript"
 )
 
 // inlineLimit is how much transcript is put in the message body rather than

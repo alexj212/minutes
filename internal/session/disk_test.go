@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 // The recording directory is created after the check runs, so a check that
@@ -26,9 +26,9 @@ func TestHeadroomThresholds(t *testing.T) {
 	const rate = 368400 // both tracks, 16-bit stereo at 48k and 44.1k
 
 	cases := []struct {
-		name           string
-		seconds        float64
-		refuse, warn   bool
+		name         string
+		seconds      float64
+		refuse, warn bool
 	}{
 		{"ten minutes", 600, true, true},
 		{"half an hour", 1800, false, true},
@@ -150,13 +150,13 @@ func TestHumanBytes(t *testing.T) {
 // Learned by doing it: a recording under /tmp was delivered and then deleted.
 func TestVolatileDirectoriesAreRecognised(t *testing.T) {
 	cases := map[string]bool{
-		"/tmp/route/2026-08-25-000000":        true,
-		"/tmp":                                true,
-		"/var/tmp/thing":                      true,
-		"/dev/shm/thing":                      true,
-		"/home/alexj/minutes/2026-08-25":      false,
-		"/c/projects/minutes/recordings/x":    false,
-		"/home/alexj/tmp/not-really-volatile": false,
+		"/tmp/route/2026-08-25-000000":      true,
+		"/tmp":                              true,
+		"/var/tmp/thing":                    true,
+		"/dev/shm/thing":                    true,
+		"/home/you/minutes/2026-08-25":      false,
+		"/c/projects/minutes/recordings/x":  false,
+		"/home/you/tmp/not-really-volatile": false,
 	}
 	for dir, want := range cases {
 		if got := IsVolatile(dir); got != want {

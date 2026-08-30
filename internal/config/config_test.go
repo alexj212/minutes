@@ -6,7 +6,7 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/alexj/minutes/internal/transcribe"
+	"github.com/alexj212/minutes/internal/transcribe"
 )
 
 func writeConfig(t *testing.T, body string) {

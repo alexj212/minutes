@@ -23,15 +23,15 @@ import (
 
 	"errors"
 
-	"github.com/alexj/minutes/internal/capture"
-	"github.com/alexj/minutes/internal/config"
-	"github.com/alexj/minutes/internal/deliver"
-	"github.com/alexj/minutes/internal/indicator"
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/preflight"
-	"github.com/alexj/minutes/internal/session"
-	"github.com/alexj/minutes/internal/transcribe"
-	"github.com/alexj/minutes/internal/transcript"
+	"github.com/alexj212/minutes/internal/capture"
+	"github.com/alexj212/minutes/internal/config"
+	"github.com/alexj212/minutes/internal/deliver"
+	"github.com/alexj212/minutes/internal/indicator"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/preflight"
+	"github.com/alexj212/minutes/internal/session"
+	"github.com/alexj212/minutes/internal/transcribe"
+	"github.com/alexj212/minutes/internal/transcript"
 )
 
 // defaultRoot is where recordings go when nobody says otherwise.

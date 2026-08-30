@@ -234,7 +234,7 @@ On macOS a denied microphone **opens**. The audio unit starts, the stream format
 reads back, every call returns `noErr`, and the samples are all zero. So
 `minutes preflight` reported `mic ok` on a machine where the system log said
 `access to kTCCServiceMicrophone denied`, the recording ran, and the operator's
-side was empty. Found by `minutes-mac` with Alex sitting at the machine — the
+side was empty. Found by `minutes-mac` with the operator sitting at the machine — the
 one window a human was there, spent on this instead of the attribution
 measurement it was booked for.
 
@@ -700,7 +700,7 @@ precisely the argument for a check rather than a habit.
 
 ### ~~The macOS bundle identifier named a private host~~ — renamed while it was cheap
 
-`io.dumpr.minutes-capture` was chosen without knowing that the designated
+An identifier built from a private homelab domain was chosen without knowing that the designated
 requirement names it, so changing it makes TCC treat the binary as a new subject
 and revokes every existing grant — exactly the way an ad-hoc rebuild does.
 shabadoo hit the same thing and had to rename for an unrelated reason.

@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/alexj/minutes/internal/deliver"
-	"github.com/alexj/minutes/internal/session"
-	"github.com/alexj/minutes/internal/transcribe"
+	"github.com/alexj212/minutes/internal/deliver"
+	"github.com/alexj212/minutes/internal/session"
+	"github.com/alexj212/minutes/internal/transcribe"
 )
 
 // Transcription selects and configures a backend.

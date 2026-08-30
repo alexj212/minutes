@@ -44,7 +44,7 @@ $ minutes start --name standup
 │  ● RECORDING — microphone and system audio   │
 └──────────────────────────────────────────────┘
   id:       2026-08-25-104604-standup
-  files:    /home/alexj/minutes/2026-08-25-104604-standup
+  files:    /home/you/minutes/2026-08-25-104604-standup
   segments: 5m0s
 
   stop with:  minutes stop 2026-08-25-104604-standup

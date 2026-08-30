@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/alexj/minutes/internal/frame"
-	"github.com/alexj/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/frame"
+	"github.com/alexj212/minutes/internal/manifest"
 )
 
 // buildFrame assembles one frame in the layout docs/protocol.md specifies.

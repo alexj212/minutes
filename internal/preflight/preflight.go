@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alexj/minutes/internal/frame"
-	"github.com/alexj/minutes/internal/wav"
+	"github.com/alexj212/minutes/internal/frame"
+	"github.com/alexj212/minutes/internal/wav"
 )
 
 // TrackStatus is what the platform reported about one track.
@@ -441,7 +441,7 @@ const (
 // Every check before this one asks the device whether it will open. On macOS a
 // *denied* microphone opens: the audio unit starts, the stream format reads
 // back, every call returns success. Preflight passed, a real meeting recorded,
-// and the operator's side was empty — found by minutes-mac with Alex sitting at
+// and the operator's side was empty — found by minutes-mac with the operator sitting at
 // the machine, with "access to kTCCServiceMicrophone denied" in the system log
 // and nothing in the capture path able to see it.
 //

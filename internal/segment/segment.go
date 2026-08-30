@@ -17,8 +17,8 @@ import (
 	"math"
 	"path/filepath"
 
-	"github.com/alexj/minutes/internal/manifest"
-	"github.com/alexj/minutes/internal/wav"
+	"github.com/alexj212/minutes/internal/manifest"
+	"github.com/alexj212/minutes/internal/wav"
 )
 
 // syncEvery bounds how much audio may be written before the open segment's

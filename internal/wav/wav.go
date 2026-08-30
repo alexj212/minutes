@@ -54,7 +54,7 @@ func NewWriter(path string, sampleRate, channels int) (*Writer, error) {
 	return &Writer{f: f, path: path, sampleRate: sampleRate, channels: channels}, nil
 }
 
-func (w *Writer) Path() string  { return w.path }
+func (w *Writer) Path() string   { return w.path }
 func (w *Writer) Frames() uint64 { return w.framesWritten }
 
 // Duration returns the length of the file written so far, in seconds.
@@ -89,7 +89,7 @@ func (w *Writer) writeSilence(frames uint64) error {
 		if n > chunkFrames {
 			n = chunkFrames
 		}
-		b := w.silence[: int(n)*w.channels*2]
+		b := w.silence[:int(n)*w.channels*2]
 		if _, err := w.f.Write(b); err != nil {
 			return err
 		}
