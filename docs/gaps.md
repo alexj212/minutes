@@ -414,6 +414,15 @@ tested as the machine the tests run on.** Mine could not reach the interesting
 state, and no amount of care in writing them would have changed that. It took a
 second machine in a different condition.
 
+And it is symmetric, which is the part that makes it an argument rather than an
+apology. Neither node can write a test for a state it cannot enter: this one
+cannot reach a denied microphone, that one cannot reach a working one. **The
+pair is the test rig.** minutes-mac put the reciprocity plainly — they could not
+demonstrate `carrying signal` until the mic-failing path stopped short-circuiting,
+so *the fix is what made their machine able to verify the fix*. Neither of us
+could have closed it alone, and that is a reason for cross-node briefing to be
+routine rather than exceptional.
+
 ### ~~The advice for a dead microphone named a remedy that does not always exist~~ — fixed
 
 Preflight told every operator with a constant microphone to open System

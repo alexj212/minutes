@@ -397,9 +397,12 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 		// who could see it because their microphone is denied and mine is not —
 		// from here the branch looked covered.
 		//
-		// It costs about two seconds on a path that is already refusing. That
-		// is the right trade: a refusal naming what does still work is a
-		// different message from one that only says no.
+		// Measured on the slower of the two machines, an M-series Air, on the
+		// refusal path where both probes run: 2.54s cold then 2.01s and 2.02s.
+		// Two seconds to be told what is broken *and* what still works, once
+		// before a meeting rather than in a loop. That is the right trade: a
+		// refusal naming what does still work is a different message from one
+		// that only says no.
 		micV := probeTrack(ctx, helper, frame.TrackMic)
 		res.Mic.Signal = signalOf(micV)
 		// The same measurement on the far end, reported and never enforced.

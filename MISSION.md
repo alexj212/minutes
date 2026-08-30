@@ -12,7 +12,7 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- shabadoo: hardened runtime, no audio-input entitlement · macOS will not prompt, no mic on any Mac · one entitlement
+- you: upgrade shabadoo to v0.4.71, restart the node · entitled build is out, no Mac mic until it runs · one restart
 - wsl: ~5.2 GB of recordings there · the Mac's 254 MB is gone, retention ran and worked · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
@@ -20,6 +20,7 @@ by a peer or by real audio rather than by the test suite.
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
+- 2026-08-30 shabadoo published the entitled build as darwin/arm64 v0.4.71, verified in `shabadoo releases` rather than taken on the claim. The blocker moves to a node restart, which is Alex's call because it restarts the session that would trigger it.
 - 2026-08-30 retention ran for the first time ever, on the Mac: `minutes rm --older-than` removed all 7 recordings and freed 253.9 MB, naming which had undelivered notes before touching them. The command works; nothing had ever run it.
 - 2026-08-30 the mic is not denied, it is unaskable. shabadoo signs with hardened runtime and no `com.apple.security.device.audio-input`, so TCC logs "Policy disallows prompt" and refuses to raise a dialog at all. Not a regression in the installed build: hardened runtime arrived with signing itself at v0.4.40, and the log says "failed to match **existing** code requirement" — a grant existed, the first real signature invalidated the requirement it was recorded against, and that is exactly when a prompt is needed and exactly when the missing entitlement forbids one. The fix for the first problem created the conditions for the second. Fix shipping with the entitlement; not yet published.
 - 2026-08-30 the helper's signature is not the lever: three variants — hardened+entitlement, no-hardened, and shipping — all returned 96256 samples of 1 distinct value. Responsibility is the variable, as this file already said and we had drifted from believing.
