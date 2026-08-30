@@ -12,14 +12,15 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- shabadoo: pushing v0.4.71 to this node · Alex authorised it, task filed, restart may end this session · in flight
+- shabadoo: v0.4.73 not published · v0.4.72 signed by v0.4.65's code, so no entitlement, mic still dead · publish
+- nobody: system audio died at the v0.4.72 upgrade · 183 frames before, 0 after, 3 runs · cause unestablished
 - wsl: ~5.2 GB of recordings there · the Mac's 254 MB is gone, retention ran and worked · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
-- nobody: macOS recording indicator · the consent dialog names the launcher, not us · NSStatusBar + signing
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
+- 2026-08-30 the macOS recording indicator ask is parked here rather than in Waiting on: the list holds 6 rows and the parser drops the 7th silently, and a live regression outranks a disclosure improvement. It is unchanged — the consent dialog names the launcher, not us, and wants an NSStatusBar indicator. Restore it to the list when a row frees up.
 - 2026-08-30 shabadoo published the entitled build as darwin/arm64 v0.4.71, verified in `shabadoo releases` rather than taken on the claim. The blocker moves to a node restart, which is Alex's call because it restarts the session that would trigger it.
 - 2026-08-30 retention ran for the first time ever, on the Mac: `minutes rm --older-than` removed all 7 recordings and freed 253.9 MB, naming which had undelivered notes before touching them. The command works; nothing had ever run it.
 - 2026-08-30 the mic is not denied, it is unaskable. shabadoo signs with hardened runtime and no `com.apple.security.device.audio-input`, so TCC logs "Policy disallows prompt" and refuses to raise a dialog at all. Not a regression in the installed build: hardened runtime arrived with signing itself at v0.4.40, and the log says "failed to match **existing** code requirement" — a grant existed, the first real signature invalidated the requirement it was recorded against, and that is exactly when a prompt is needed and exactly when the missing entitlement forbids one. The fix for the first problem created the conditions for the second. Fix shipping with the entitlement; not yet published.
