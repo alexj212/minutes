@@ -11,6 +11,55 @@ and proven, see [status.md](status.md).
 
 ## 1. Could cost you a meeting
 
+### The system tap is intermittent, and intermittent is worse than dead
+
+**The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
+that will pass a check and fail a meeting* — which is the failure this project
+exists to refuse, arriving in the one component that has no second source.
+
+Measured on the Mac, not inferred. The tap holds a mode across a run of
+attempts and flips between them: **twenty consecutive captures delivered audio,
+then twenty delivered none**, same command, tone verified playing throughout
+both, minutes apart. A dead mode has been observed lasting 0/90 over three
+minutes with no transition logged.
+
+**That is why every isolated measurement that day read as conclusive.** A single
+run samples whichever mode is current and looks definitive either way — and it
+retired a plan to test the remaining lead by running it a few times with a
+driver present and a few times without, since either arm could return twenty of
+anything and mean nothing. It also retired a control that had already been
+accepted; see the clock-source entry below.
+
+The sharpest statement of it is only sayable because of the `carrying signal`
+label added the same afternoon: **preflight reported `carrying signal` in the
+same minute that three manual runs of the same binary reported nothing.** Two
+readings of one device, seconds apart, disagreeing. Before the label both would
+have said `system ok` and there would have been no vocabulary for the
+contradiction — *a label that makes two readings capable of disagreeing is
+diagnostic equipment, not documentation.*
+
+**Eliminated, every one of them measured while the dead mode was current**, so
+that nobody re-runs them:
+
+| Ruled out | How |
+|---|---|
+| a both-track capture, a preflight run, a mic-only capture | none of them flips it |
+| the render client's identity | `afplay` and `say` equally invisible |
+| the default output device changing | unchanged throughout, `BuiltInSpeakerDevice` |
+| the tap-only aggregate / clock source | now refuses loudly, and does not fire in the dead mode |
+| a pending consent request blocking later opens | measured with no helper running and none outstanding: zero frames against a 183-frame baseline |
+| capture duration | no effect across 1500–6000 ms |
+| self-flipping | 0/90 untouched over ~3 minutes, no transition |
+
+**Still unknown: the trigger.** The remaining lead is a third-party CoreAudio
+driver and it needs somebody at the physical machine. Nothing here can be tested
+by repetition until the variable that flips the mode is found, because
+repetition is exactly what the stickiness defeats.
+
+The silent control still behaves — five captures with nothing playing delivered
+nothing — so an idle endpoint and the failing mode are separable only by what is
+playing, never by the result.
+
 ### ~~A device that fails mid-recording is reported as a clean stop~~ — fixed
 
 *Was the worst one here.* A mid-stream `GetBuffer` failure — what an unplugged
@@ -512,7 +561,7 @@ and were invisible until somebody asked the type what it says when nobody has
 set it. **The default-construction path is a case, and it is the one no test
 constructs** — every test builds the struct deliberately and sets the field.
 
-### ~~The comment named the fatal state and the else branch entered it~~ — fixed, and unbuilt here
+### ~~The comment named the fatal state and the else branch entered it~~ — fixed, built, and it settled a hypothesis
 
 `audio.swift` says, in the paragraph immediately above the code:
 
@@ -549,13 +598,33 @@ preflight can say which. **Refusing costs nothing real** — a Mac with no usabl
 default output device has no system audio to capture — while opening anyway
 costs a meeting, discovered afterwards.
 
-**And this repo cannot verify its own fix.** There is no Swift toolchain on the
-WSL node: `make helper` there builds the Windows `.exe`, `make test` is Go only,
-and every guard stayed green over an edit to a file none of them can read. So
-the same shape holds at the level of the repository — *a check that cannot fire
-looks exactly like a check that passes* — and the only thing standing behind a
-darwin change is the other node building it. That is the pair-as-test-rig
-arrangement working, and it is not automation.
+**Written on a node that cannot build it, and that is a standing condition
+rather than an incident.** There is no Swift toolchain on WSL: `make helper`
+there builds the Windows `.exe`, `make test` is Go only, and **every guard
+stayed green over an edit to a file none of them can read**. The same shape at
+the level of the repository — a check that cannot fire looks exactly like a
+check that passes. It was pushed recorded as unbuilt, and minutes-mac built it:
+compiles clean, signs, 14/14, installed. The only thing standing behind a
+darwin change is the other node, which is the pair-as-test-rig arrangement
+working and is not automation.
+
+**Then it settled the hypothesis it was written for, by finding nothing.** The
+branch had been ruled out on a single probe — and the day's other finding, that
+the tap holds a mode across twenty consecutive runs, retires single
+measurements. That argument applies to a control as much as to a proposal, so
+"the lookup always succeeds" and "the lookup succeeds in whichever mode was
+current" were not separated.
+
+The refusal makes the difference observable, so it was run **in the dead mode**:
+five consecutive empty captures with a tone playing, and no refusal, no
+complaint about the clock source, the 48000-vs-44100 log firing normally, zero
+packets 5/5. The tap opens with a valid clock source and delivers nothing
+anyway.
+
+**An instrument that stays silent in the failing state has told you where the
+fault is not** — and it is a stronger negative than the one it replaced,
+because it holds across the mode that fails rather than in one draw from an
+unknown one. One dead-mode run, no controlled repeat needed.
 
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
