@@ -51,6 +51,105 @@ type TrackStatus struct {
 	// helper is signed. But the first one on any new machine still has to be
 	// given by somebody looking at a screen, and nothing else can give it.
 	Waiting string `json:"waiting,omitempty"`
+	// Signal is what a live probe established about audio actually coming out
+	// of this track, as distinct from the device agreeing to open.
+	//
+	// Never `omitempty`. An absent field here would be read as a measured
+	// "nothing", and the whole point of it is that not-measured and
+	// measured-nothing are different answers.
+	Signal Signal `json:"signal"`
+}
+
+// Signal is what a short live capture established about a track.
+//
+// `ok` was being asked to carry two meanings — the device opened, and audio
+// comes out of it — and for the system track only the first was ever checked.
+// Found by minutes-mac, who ran the probe twice with only a tone playing
+// between the runs: both exited zero, both produced `system ok`, and one of
+// them had captured nothing at all.
+//
+// A track that opened and delivered nothing is not a track that was quiet.
+// Which of those it was is a question the operator can settle in two seconds,
+// so the word says which one was established and what would settle it.
+// An integer rather than a string, so that the ZERO VALUE IS "unknown". A
+// string Signal makes the zero value `""`, and a TrackStatus nobody probed then
+// serialises an empty field — which is the very ambiguity this type exists to
+// remove, reintroduced by the choice of underlying type. Caught by the test
+// below, which failed on the first version of this.
+type Signal int
+
+const (
+	// SignalUnknown means nothing was established: the track was not probed,
+	// or the probe could not answer. Deliberately the zero value, so a status
+	// nobody measured never claims to have been measured.
+	SignalUnknown Signal = iota
+	// SignalCarrying means audio arrived and varied. The only value that
+	// establishes a working capture path end to end.
+	SignalCarrying
+	// SignalNone means the track declared its format and nothing was ever
+	// written to it.
+	//
+	// A refusal on the microphone and *expected* on the system track, which is
+	// idle before every meeting. Same measurement, opposite policy — see
+	// probeTrack.
+	SignalNone
+	// SignalConstant means audio arrived and every sample was identical:
+	// denied, muted, or a dead cable. Not a quiet room, which has a noise
+	// floor.
+	SignalConstant
+)
+
+// String is the wire form, and it names the unknown case rather than leaving it
+// blank.
+func (s Signal) String() string {
+	switch s {
+	case SignalCarrying:
+		return "carrying"
+	case SignalNone:
+		return "none"
+	case SignalConstant:
+		return "constant"
+	}
+	return "unknown"
+}
+
+// MarshalJSON writes the name. A reader of the JSON gets the same three-way
+// distinction the code has, rather than an integer they have to look up.
+func (s Signal) MarshalJSON() ([]byte, error) { return json.Marshal(s.String()) }
+
+// UnmarshalJSON accepts the name, and anything it does not recognise — an older
+// file, a helper that predates this — becomes unknown rather than an error or,
+// worse, a confident wrong value.
+func (s *Signal) UnmarshalJSON(b []byte) error {
+	var name string
+	if err := json.Unmarshal(b, &name); err != nil {
+		return err
+	}
+	switch name {
+	case "carrying":
+		*s = SignalCarrying
+	case "none":
+		*s = SignalNone
+	case "constant":
+		*s = SignalConstant
+	default:
+		*s = SignalUnknown
+	}
+	return nil
+}
+
+// Text is the phrase shown beside a track, and it says what was established
+// rather than how it scored.
+func (s Signal) Text() string {
+	switch s {
+	case SignalCarrying:
+		return "carrying signal"
+	case SignalNone:
+		return "opened; no audio observed"
+	case SignalConstant:
+		return "opened; every sample identical"
+	}
+	return "opened; signal not checked"
 }
 
 // BlockedOnConsent reports a track that is waiting for a person.
@@ -295,8 +394,9 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 			"  A denied microphone there is not an error the recorder can see: it opens,\n" +
 			"  it starts, and every call returns success.\n\n" +
 			"  Recording now would capture the far end and none of you."
-		switch probeMicrophone(ctx, helper) {
-		case micConstant:
+		switch v := probeTrack(ctx, helper, frame.TrackMic); v {
+		case probeConstant:
+			res.Mic.Signal = SignalConstant
 			res.CanRecord = false
 			res.Mic.OK = false
 			res.Mic.Error = "delivered an unvarying signal"
@@ -305,7 +405,8 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 				"  quiet room still has a noise floor. This is denied permission, a mute\n" +
 				"  switch, or a dead cable. It is not a quiet room." + advice
 			return res, nil
-		case micNoPackets:
+		case probeNoPackets:
+			res.Mic.Signal = SignalNone
 			res.CanRecord = false
 			res.Mic.OK = false
 			res.Mic.Error = "declared a track and delivered no audio at all"
@@ -316,7 +417,15 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 				"  first packet well inside the probe window, so this is not one that was\n" +
 				"  slow to start." + advice
 			return res, nil
+		default:
+			res.Mic.Signal = signalOf(v)
 		}
+
+		// The same measurement on the far end, reported and never enforced.
+		// `system ok` meant "the device opened" and was silent about whether
+		// anything came out of it — and the two are told apart only by whether
+		// something happened to be playing at the time.
+		res.System.Signal = signalOf(probeTrack(ctx, helper, frame.TrackSystem))
 	}
 
 	if !res.CanRecord {
@@ -365,8 +474,9 @@ func (r *Result) Describe() string {
 		}
 		switch {
 		case t.OK:
-			fmt.Fprintf(&b, "  %-7s ok   %-16s %s  %d Hz, %d ch, %d-bit\n",
-				label, t.Mode, t.Device, t.SampleRate, t.Channels, t.BitsPerSample)
+			fmt.Fprintf(&b, "  %-7s ok   %-16s %s  %d Hz, %d ch, %d-bit  — %s\n",
+				label, t.Mode, t.Device, t.SampleRate, t.Channels, t.BitsPerSample,
+				t.Signal.Text())
 		case t.BlockedOnConsent():
 			fmt.Fprintf(&b, "  %-7s WAIT %-16s %s\n", label, t.Mode, t.Waiting)
 		default:
@@ -377,6 +487,16 @@ func (r *Result) Describe() string {
 	describe("system", r.System)
 	if r.CanRecord {
 		b.WriteString("\nBoth tracks can be captured.\n")
+		// Not a warning, and phrased so it does not read as one. It is the
+		// ordinary state before a meeting, and the operator can settle it in
+		// two seconds — so say which way it is unresolved and what resolves it,
+		// rather than either alarming them or implying it was checked.
+		if r.System.Signal == SignalNone || r.System.Signal == SignalUnknown {
+			b.WriteString("\nNo audio was observed on the system track. That is expected when\n" +
+				"nothing is playing, and it is also what a dead capture path looks like —\n" +
+				"this cannot tell them apart. Play something for a second and run this\n" +
+				"again to settle it.\n")
+		}
 	} else {
 		b.WriteString("\n" + r.Refusal + "\n")
 	}
@@ -396,7 +516,7 @@ func (r *Result) Describe() string {
 // delivers nothing here is not one that was still warming up.
 const probeMillis = 700
 
-// micVerdict is what a short live capture says about the microphone.
+// probeVerdict is what a short live capture says about one track.
 //
 // Three states and not two, which is the distinction this project has now got
 // wrong in five places. "Delivered nothing" is not a milder "delivered
@@ -407,18 +527,18 @@ const probeMillis = 700
 // The sentence that settles it is already in this codebase, about the far end:
 // *a track declared and never written to is the same thing as no track*. It was
 // only ever asked about the far end.
-type micVerdict int
+type probeVerdict int
 
 const (
-	// micUnknown means the probe could not answer. Never a refusal: this check
+	// probeUnknown means the probe could not answer. Never a refusal: this check
 	// can establish "definitely broken" and never "definitely fine".
-	micUnknown micVerdict = iota
-	// micLive means the samples vary, which is what a capture path does.
-	micLive
-	// micConstant means every sample is identical — denied, muted, or a dead
+	probeUnknown probeVerdict = iota
+	// probeLive means the samples vary, which is what a capture path does.
+	probeLive
+	// probeConstant means every sample is identical — denied, muted, or a dead
 	// cable. Not a quiet room: a real room is not constant.
-	micConstant
-	// micNoPackets means the track was declared and nothing was ever written to
+	probeConstant
+	// probeNoPackets means the track was declared and nothing was ever written to
 	// it.
 	//
 	// **Real, and currently unwitnessed on darwin — which is not the same as
@@ -433,10 +553,27 @@ const (
 	// declares a format and never writes to it is a different thing from one
 	// that writes zeros, whether or not the machine in front of you has managed
 	// it yet.
-	micNoPackets
+	probeNoPackets
 )
 
-// probeMicrophone runs a short capture and reports what came out.
+// signalOf translates a probe verdict into what it established.
+//
+// probeUnknown maps to SignalUnknown rather than to anything reassuring: a
+// probe that could not answer has established nothing, and this check can show
+// "definitely broken" but never "definitely fine".
+func signalOf(v probeVerdict) Signal {
+	switch v {
+	case probeLive:
+		return SignalCarrying
+	case probeConstant:
+		return SignalConstant
+	case probeNoPackets:
+		return SignalNone
+	}
+	return SignalUnknown
+}
+
+// probeTrack runs a short capture and reports what came out.
 //
 // Every check before this one asks the device whether it will open. On macOS a
 // *denied* microphone opens: the audio unit starts, the stream format reads
@@ -445,18 +582,34 @@ const (
 // the machine, with "access to kTCCServiceMicrophone denied" in the system log
 // and nothing in the capture path able to see it.
 //
-// Microphone only, deliberately. A loopback track legitimately delivers nothing
-// while the render endpoint is idle, which it is before every meeting — there,
-// silence is the ordinary case rather than the alarming one.
-func probeMicrophone(ctx context.Context, helper string) micVerdict {
+// Run on both tracks, and the verdict is read differently on each. That is a
+// policy difference, not a measurement one, and it is the whole reason this
+// takes a track rather than assuming one:
+//
+//   - On the microphone, "no audio" and "constant" are refusals. Recording
+//     anyway produces a meeting with the operator missing from it, discovered
+//     afterwards.
+//   - On the system track neither is, because a loopback track legitimately
+//     delivers nothing while the render endpoint is idle — which it is before
+//     every meeting. A refusal there would block valid recordings to prevent a
+//     problem that usually is not one, and the far end arriving late is normal.
+//
+// So the system track's verdict is reported and never enforced. Saying "ok"
+// for both "it opened" and "audio comes out of it" is what hid the difference;
+// measuring it and refusing to act on it is the honest position.
+func probeTrack(ctx context.Context, helper string, track frame.Track) probeVerdict {
 	probeCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
+	only := "--mic-only"
+	if track == frame.TrackSystem {
+		only = "--system-only"
+	}
 	cmd := exec.CommandContext(probeCtx, helper,
-		"--duration-ms", strconv.Itoa(probeMillis), "--mic-only")
+		"--duration-ms", strconv.Itoa(probeMillis), only)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return micUnknown
+		return probeUnknown
 	}
 	// stdin must stay open for the whole probe, and forgetting that made this
 	// check inert on both platforms.
@@ -472,13 +625,13 @@ func probeMicrophone(ctx context.Context, helper string) micVerdict {
 	// that passes.
 	r, w, err := os.Pipe()
 	if err != nil {
-		return micUnknown
+		return probeUnknown
 	}
 	cmd.Stdin = r
 	if err := cmd.Start(); err != nil {
 		r.Close()
 		w.Close()
-		return micUnknown
+		return probeUnknown
 	}
 	r.Close()
 	defer func() {
@@ -495,13 +648,13 @@ func probeMicrophone(ctx context.Context, helper string) micVerdict {
 		if err != nil {
 			break
 		}
-		if f.Type == frame.TypeTrackInfo && f.Track == frame.TrackMic {
+		if f.Type == frame.TypeTrackInfo && f.Track == track {
 			if ti, err := frame.ParseTrackInfo(f.Payload); err == nil {
 				info, haveInfo = ti, true
 			}
 			continue
 		}
-		if f.Type != frame.TypeAudio || f.Track != frame.TrackMic || !haveInfo {
+		if f.Type != frame.TypeAudio || f.Track != track || !haveInfo {
 			continue
 		}
 		samples, err := wav.ToInt16(f.Payload, info.FormatTag, info.BitsPerSample)
@@ -524,19 +677,19 @@ func probeMicrophone(ctx context.Context, helper string) micVerdict {
 		// Any variation at all means a live capture path, and there is no
 		// reason to keep recording once that is established.
 		if seen && lo != hi {
-			return micLive
+			return probeLive
 		}
 	}
 
 	switch {
 	case sawAudio:
-		return micConstant
+		return probeConstant
 	case haveInfo:
 		// Declared a track and never wrote to it.
-		return micNoPackets
+		return probeNoPackets
 	}
-	// The helper said the microphone was fine and then did not even declare it.
+	// The helper said the track was fine and then did not even declare it.
 	// That is a fault, but it is indistinguishable from the probe failing to
 	// run, so it is not grounds to refuse.
-	return micUnknown
+	return probeUnknown
 }

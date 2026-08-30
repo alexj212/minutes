@@ -337,6 +337,65 @@ Two things follow, and the second is the general one:
 Found by `minutes-mac` pointing `90864db` at the one machine with a provably
 denied microphone and reporting that it still passed.
 
+### ~~`system ok` meant "the device opened", never "audio comes out of it"~~ — fixed
+
+The sixth instance of the shape, and the first one found in the *fix* for an
+earlier instance. The microphone got a live probe because opening a device
+proves nothing about it; the system track was left with the word `ok` doing
+both jobs.
+
+`minutes-mac` found it by accident and reported it against themselves. They had
+told four sessions "the system tap is delivering 44100 Hz right now" on the
+strength of `system ok` — the exact move they had just caught me making about
+the microphone — then went and established it:
+
+    with a 440 Hz tone playing:   AUDIO 183, samples 187392, distinct 49753, peak -43.0 dBFS
+    with nothing playing:         AUDIO 0
+
+**Both exit zero. Both produce `system ok`.** The only difference between the
+runs is whether something happened to be playing, which is not a property of
+the capture path at all. So:
+
+    tap working, endpoint idle  ->  0 audio frames  ->  "system ok"
+    tap dead, never started     ->  0 audio frames  ->  "system ok"
+
+**The fix is not to copy the microphone's probe across, and this is the useful
+part.** Silence on the system track is legitimate and common — the render
+endpoint is idle before every meeting, which this repo documents — so a
+constant-signal refusal there would refuse valid recordings. Same measurement,
+opposite policy, and the costs run in opposite directions: a silent microphone
+is a meeting recorded without the operator in it, discovered afterwards; a
+silent system track is Tuesday.
+
+So the system track is probed and the result is **reported and never
+enforced**, while the word carries what was established:
+
+    mic     ok  ...  — carrying signal
+    system  ok  ...  — opened; no audio observed
+
+There is a test whose only job is to stop somebody wiring the system probe to
+the microphone's refusal, because that is the obvious next change to that file.
+
+**And the honest label needed one more thing than honesty.** `opened; no audio
+observed` is genuinely ambiguous — it is what a working idle endpoint looks
+like *and* what a dead one looks like, and preflight cannot separate them. A
+label that stops there hands the operator an unresolved state and no way to
+resolve it. It now says what settles it: play something for a second and run it
+again. **The state is resolvable in two seconds, and saying so is what makes
+the honest answer useful rather than merely correct.**
+
+The type caught its own defect on the way in. `Signal` was first written as a
+string, which makes its zero value `""` — so a track nobody probed would
+serialise an empty field, indistinguishable from a measured nothing, which is
+the precise ambiguity the type exists to remove. The test asserting the zero
+value *is* unknown failed on the first version and the type became an integer.
+
+Not a delivery gap, and that was checked rather than assumed: a recording whose
+system track wrote `segments: null` is already disclosed at delivery — the
+transcript header and the brief both say the recording captured one source and
+cannot say who spoke. What was missing was the chance to know *before* the
+meeting.
+
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
 `-999` means "there was no signal to measure" and was printed as

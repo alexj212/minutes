@@ -3,10 +3,13 @@ package preflight
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/alexj212/minutes/internal/frame"
 )
 
 // fakeHelper writes an executable that prints the given report, so the refusal
@@ -291,17 +294,17 @@ func TestTheThreeThingsAMicrophoneCanDo(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		out  []byte
-		want micVerdict
+		want probeVerdict
 	}{
-		{"varying audio is a working device", live, micLive},
-		{"all zeros is denied or muted", constant, micConstant},
-		{"pinned at a non-zero value is a dead cable", pinned, micConstant},
-		{"declared and never written to is not silence", nothing, micNoPackets},
+		{"varying audio is a working device", live, probeLive},
+		{"all zeros is denied or muted", constant, probeConstant},
+		{"pinned at a non-zero value is a dead cable", pinned, probeConstant},
+		{"declared and never written to is not silence", nothing, probeNoPackets},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := probeMicrophone(context.Background(), probeHelper(t, tc.out))
+			got := probeTrack(context.Background(), probeHelper(t, tc.out), frame.TrackMic)
 			if got != tc.want {
-				t.Errorf("probeMicrophone = %v, want %v", got, tc.want)
+				t.Errorf("probeTrack = %v, want %v", got, tc.want)
 			}
 		})
 	}
@@ -309,8 +312,8 @@ func TestTheThreeThingsAMicrophoneCanDo(t *testing.T) {
 	// A helper that says nothing at all cannot be distinguished from a probe
 	// that failed to run, so it must not refuse. This check establishes
 	// "definitely broken" and never "definitely fine".
-	if got := probeMicrophone(context.Background(), probeHelper(t, nil)); got != micUnknown {
-		t.Errorf("a silent helper gave %v, want micUnknown — refusing on this would refuse "+
+	if got := probeTrack(context.Background(), probeHelper(t, nil), frame.TrackMic); got != probeUnknown {
+		t.Errorf("a silent helper gave %v, want probeUnknown — refusing on this would refuse "+
 			"every machine where the probe cannot run", got)
 	}
 }
@@ -355,8 +358,169 @@ func TestTheProbeHoldsTheHelpersStdinOpen(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got := probeMicrophone(context.Background(), script); got != micLive {
-		t.Errorf("probeMicrophone = %v, want micLive — the helper only emits audio while "+
+	if got := probeTrack(context.Background(), script, frame.TrackMic); got != probeLive {
+		t.Errorf("probeTrack = %v, want probeLive — the helper only emits audio while "+
 			"its stdin is open, so this means the probe closed it and the check is inert", got)
+	}
+}
+
+// `ok` was being asked to carry two meanings on the system track and only one
+// of them was ever checked: the device opened. Whether audio came out of it was
+// decided entirely by whether something happened to be playing.
+//
+// Found by minutes-mac running the same probe twice with only a tone playing
+// between the runs. Both exited zero, both produced `system ok`, and one had
+// captured nothing at all.
+//
+// Asserted as a pair rather than an example, because a single case passes a
+// renderer that has stopped telling the two apart.
+func TestOkSaysWhichOfItsTwoMeaningsWasEstablished(t *testing.T) {
+	base := TrackStatus{OK: true, Mode: "wasapi-loopback", Device: "Speakers",
+		SampleRate: 44100, Channels: 2, BitsPerSample: 32}
+
+	carrying := base
+	carrying.Signal = SignalCarrying
+	none := base
+	none.Signal = SignalNone
+
+	a := (&Result{Platform: "windows", CanRecord: true, Mic: carrying, System: carrying}).Describe()
+	b := (&Result{Platform: "windows", CanRecord: true, Mic: carrying, System: none}).Describe()
+
+	if a == b {
+		t.Fatal("a system track carrying audio and one that delivered none render " +
+			"identically — this is the defect, not a cosmetic difference")
+	}
+	if !strings.Contains(b, "no audio was observed") && !strings.Contains(b, "no audio observed") {
+		t.Errorf("a track that delivered nothing does not say so:\n%s", b)
+	}
+	// It must not read as a fault. The endpoint is idle before every meeting,
+	// so an operator told to go and fix this would be sent after nothing.
+	if strings.Contains(b, "FAIL") || !strings.Contains(b, "Both tracks can be captured.") {
+		t.Errorf("an idle system track is being reported as a failure:\n%s", b)
+	}
+	// And it must say what settles it, or the honest label is just a shrug.
+	if !strings.Contains(b, "Play something") {
+		t.Errorf("says the state is unresolved without saying what resolves it:\n%s", b)
+	}
+}
+
+// A probe that could not answer must not claim a measured "nothing".
+//
+// This is the empty-versus-unknown rule at the point of measurement: the zero
+// value of Signal is "unknown", so a status nobody probed never reads as one
+// that was probed and came back empty.
+func TestAnUnprobedTrackDoesNotClaimToHaveBeenProbed(t *testing.T) {
+	var zero Signal
+	if zero != SignalUnknown {
+		t.Fatalf("the zero value is %q, want %q — an unprobed track would inherit "+
+			"whatever this is and assert it", zero, SignalUnknown)
+	}
+	for _, tc := range []struct {
+		v    probeVerdict
+		want Signal
+	}{
+		{probeLive, SignalCarrying},
+		{probeConstant, SignalConstant},
+		{probeNoPackets, SignalNone},
+		{probeUnknown, SignalUnknown},
+	} {
+		if got := signalOf(tc.v); got != tc.want {
+			t.Errorf("signalOf(%v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+	// Never omitempty: an absent field would be read as a measured nothing.
+	b, err := json.Marshal(TrackStatus{OK: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), `"signal"`) {
+		t.Errorf("signal is omitted when unknown: %s\n"+
+			"an absent field is indistinguishable from a measured result", b)
+	}
+}
+
+// dispatchHelper answers --preflight with a report and each probe with frames,
+// so a whole Run() can be exercised against a machine whose two tracks behave
+// differently from each other.
+func dispatchHelper(t *testing.T, report string, mic, system []byte) string {
+	t.Helper()
+	dir := t.TempDir()
+	write := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	body := "#!/bin/sh\ncase \"$*\" in\n" +
+		"  *--mic-only*)    cat " + write("mic.bin", mic) + " ;;\n" +
+		"  *--system-only*) cat " + write("sys.bin", system) + " ;;\n" +
+		"  *)               cat " + write("report.json", []byte(report)) + " ;;\n" +
+		"esac\n"
+	p := filepath.Join(dir, "dispatch-helper")
+	if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// The same measurement, the opposite policy, and the difference is deliberate.
+//
+// A microphone that delivers nothing is a refusal: recording anyway produces a
+// meeting with the operator missing from it. A system track that delivers
+// nothing is NOT, because the render endpoint is idle before every meeting —
+// this repo documents that — so refusing there would block valid recordings to
+// prevent a problem that usually is not one.
+//
+// Worth a test rather than a comment: the obvious next change to this file is
+// to notice the microphone has a probe, give the system track the same one, and
+// wire it to the same refusal.
+func TestAnIdleSystemTrackIsReportedAndNeverRefused(t *testing.T) {
+	if !IsWSL() || !InteropEnabled() {
+		t.Skip("Run()'s helper path under test only applies on a WSL host with interop")
+	}
+	const report = `{
+  "platform": "windows",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "wasapi-capture", "device": "Mic", "sampleRate": 48000, "channels": 1, "bitsPerSample": 16, "formatTag": 1},
+    "system": {"ok": true, "mode": "wasapi-loopback", "device": "Speakers", "sampleRate": 44100, "channels": 2, "bitsPerSample": 32, "formatTag": 3}
+  },
+  "ok": true
+}`
+	const (
+		typTrackInfo = 1
+		typAudio     = 2
+	)
+	micInfo := frameBytes(typTrackInfo, 0, micTrackInfo())
+	liveMic := append(append([]byte{}, micInfo...), frameBytes(typAudio, 0, pcm(3, -2, 5, -1, 4))...)
+	sysInfo := frameBytes(typTrackInfo, 1, micTrackInfo())
+
+	// The system track declares itself and never writes: nothing is playing.
+	t.Setenv("MINUTES_HELPER", dispatchHelper(t, report, liveMic, sysInfo))
+	res, err := Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !res.CanRecord {
+		t.Fatalf("refused a recording because nothing was playing yet:\n%s", res.Refusal)
+	}
+	if res.System.Signal != SignalNone {
+		t.Errorf("System.Signal = %q, want %q — the probe ran and saw no audio, "+
+			"and that has to be recorded even though it is not a fault",
+			res.System.Signal, SignalNone)
+	}
+	if res.Mic.Signal != SignalCarrying {
+		t.Errorf("Mic.Signal = %q, want %q", res.Mic.Signal, SignalCarrying)
+	}
+
+	// And with something playing, the same call establishes the stronger claim.
+	liveSys := append(append([]byte{}, sysInfo...), frameBytes(typAudio, 1, pcm(7, -3, 9, 2))...)
+	t.Setenv("MINUTES_HELPER", dispatchHelper(t, report, liveMic, liveSys))
+	res, err = Run(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.System.Signal != SignalCarrying {
+		t.Errorf("System.Signal = %q with audio flowing, want %q", res.System.Signal, SignalCarrying)
 	}
 }

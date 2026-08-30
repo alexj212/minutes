@@ -235,6 +235,7 @@ can be redone. Bring the refusal to the user; do not clear it on their behalf.
 | `--app` matched nothing, or two things | (none) | naming the wrong process records silence |
 | preflight says an endpoint will not start | (none) | the recording would be missing half the conversation |
 | preflight is **waiting** for a permission dialog | (none) | nothing is broken; somebody has to answer it. Do not report this as a failure |
+| preflight says `system ... opened; no audio observed` | (none) | **not a failure and not a refusal.** The render endpoint is idle until something plays, which it is before every meeting. It is also what a dead capture path looks like and preflight cannot tell them apart — if it matters, play something for a second and run it again |
 | a one-source recording carries **no speaker labels** | (none) | with nothing captured from the far end the microphone holds whoever was in the room, not the operator. Never re-attribute those lines |
 
 ## Audio leaves this machine only when told to

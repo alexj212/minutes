@@ -34,10 +34,15 @@ $ make install
 $ minutes preflight
 platform: wsl
 helper:   /c/projects/minutes/dist/minutes-capture.exe
-  mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit
-  system  ok   wasapi-loopback  Speakers (Realtek(R) Audio)  44100 Hz, 2 ch, 32-bit
+  mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit  — carrying signal
+  system  ok   wasapi-loopback  Speakers (Realtek(R) Audio)  44100 Hz, 2 ch, 32-bit  — opened; no audio observed
 
 Both tracks can be captured.
+
+No audio was observed on the system track. That is expected when
+nothing is playing, and it is also what a dead capture path looks like —
+this cannot tell them apart. Play something for a second and run this
+again to settle it.
 
 $ minutes start --name standup
 ┌──────────────────────────────────────────────┐

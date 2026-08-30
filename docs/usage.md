@@ -84,10 +84,15 @@ none of them, because it would be looking beside the current directory too.
 $ minutes preflight
 platform: wsl
 helper:   /c/projects/minutes/dist/minutes-capture.exe
-  mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit
-  system  ok   wasapi-loopback  Speakers (Realtek(R) Audio)  44100 Hz, 2 ch, 32-bit
+  mic     ok   wasapi-capture   Microphone (2- Insta360 Link)  48000 Hz, 2 ch, 32-bit  — carrying signal
+  system  ok   wasapi-loopback  Speakers (Realtek(R) Audio)  44100 Hz, 2 ch, 32-bit  — opened; no audio observed
 
 Both tracks can be captured.
+
+No audio was observed on the system track. That is expected when
+nothing is playing, and it is also what a dead capture path looks like —
+this cannot tell them apart. Play something for a second and run this
+again to settle it.
 ```
 
 Exit code 0 means a recording started now would capture both sides. Non-zero
@@ -101,6 +106,30 @@ that plays — and is missing half the conversation.
 
 The two tracks commonly run at *different* sample rates. That is normal and
 handled; they are aligned by timestamp, not by sample count.
+
+**`ok` used to mean two things and only checked one.** Opening a device and
+getting audio out of it are separate claims, so each track now says which was
+established:
+
+| | Means |
+|---|---|
+| `carrying signal` | audio arrived and varied. The capture path works end to end |
+| `opened; no audio observed` | the device opened and nothing came out. **Not a fault** on the system track — the render endpoint is idle until something plays |
+| `opened; every sample identical` | audio arrived and never changed: denied, muted, or a dead cable. A refusal on the microphone |
+| `opened; signal not checked` | the probe could not run. Nothing was established either way |
+
+The microphone refuses on the last two and the system track never refuses on
+any of them. That is deliberate, and the costs run opposite ways: a silent
+microphone means recording a meeting you are absent from, discovered
+afterwards, while a silent system track is the ordinary state before every
+meeting — refusing there would block valid recordings to prevent a problem that
+usually is not one.
+
+Which leaves `opened; no audio observed` genuinely ambiguous on the system
+track: it is what a working idle endpoint looks like *and* what a dead capture
+path looks like, and preflight cannot tell them apart. It says so rather than
+picking one, and you can settle it in two seconds by playing something and
+running it again.
 
 ---
 
