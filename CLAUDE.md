@@ -98,7 +98,7 @@ Verified on the target machines, not assumed:
 | Platform | Microphone | System audio | Notes |
 |---|---|---|---|
 | **Windows** | WASAPI capture | **WASAPI loopback**, default render endpoint | the target, and R1 is built on it. Three Windows SDKs are installed, all carrying `audioclientactivationparams.h`; only the **2019** MSVC install is complete (see below) |
-| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement, but do need a `kTCCServiceAudioCapture` grant, and the helper must be **signed with a stable identity** or that grant is asked for again after every rebuild (see below) |
+| **macOS** | HAL audio unit, default input | **CoreAudio process tap** through a private aggregate | R5 is built on it and proven on 26.5.2. Taps need no entitlement, but do need a `kTCCServiceAudioCapture` grant — held against whatever **launched** the helper, not the helper, so its own signature does not buy a durable grant (see below). The microphone is a separate grant that can be denied while the tap is allowed |
 | **Linux** | pulse source | `<sink>.monitor` | works with ffmpeg alone |
 | **WSL** | `RDPSource` works | **trap** | `RDPSink.monitor` carries only audio from Linux apps *inside* WSL |
 
@@ -183,14 +183,14 @@ zero, and the deficit was the same *fraction* in every run: 7.95%, 7.99% —
 `kAudioDevicePropertyNominalSampleRate` on the aggregate and believe that.
 
 **Consent is a different service than you expect, it is checked later than you
-expect, and it blocks rather than fails.** The gate is `kTCCServiceAudioCapture`
-— not `kTCCServiceMicrophone` — and it is not consulted when the tap is created.
-Creating the tap and the aggregate both return `noErr` on a machine that cannot
-capture a single sample. It is checked in the `AudioDeviceCreateIOProcIDWithBlock`
-path, where it does not return "denied": it sits in a synchronous `mach_msg` to
-`coreaudiod` indefinitely, waiting for a dialog to be answered. The identical
-call on an aggregate with no tap returns instantly, which is how that was
-isolated.
+expect, and it blocks rather than fails.** The gate *for the tap* is
+`kTCCServiceAudioCapture` — not `kTCCServiceMicrophone` — and it is not
+consulted when the tap is created. Creating the tap and the aggregate both
+return `noErr` on a machine that cannot capture a single sample. It is checked
+in the `AudioDeviceCreateIOProcIDWithBlock` path, where it does not return
+"denied": it sits in a synchronous `mach_msg` to `coreaudiod` indefinitely,
+waiting for a dialog to be answered. The identical call on an aggregate with no
+tap returns instantly, which is how that was isolated.
 
 So every setup call is bounded and a timeout is reported as its own outcome.
 Without that the helper produces no report at all and the operator is told "the

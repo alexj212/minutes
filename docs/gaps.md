@@ -262,6 +262,38 @@ Two refinements from other sessions, both better than the first version:
 end-to-end exercise of the delivery path on darwin returned a defect report
 rather than notes, which is the delivery path working.
 
+**Re-measured on `c759b43`, and the check earned its keep.** `minutes-mac` ran
+the shipped probe against the still-denied microphone and then refused to take
+its word for it — running the helper directly for two seconds and counting the
+samples rather than trusting the verdict:
+
+    helper exit code        0          <- it reports success
+    frames                  TRACK_INFO 1, AUDIO 188, END 1
+    samples                 96256
+    distinct sample values  1
+    min 0, max 0
+
+96,256 samples and one distinct value. Not a quiet room: a quiet room has a
+noise floor. The device is not broken either — OS input volume 36, built-in
+microphone, 48000 Hz, unmuted. It is present, working, and told no.
+
+**The finding underneath it: a denial is remembered exactly the way a grant
+is.** No dialog appeared. macOS does not re-ask a question it has already been
+answered, so *"nothing prompted"* is **not** evidence of a grant — and the
+`waiting` outcome preflight was carefully given cannot separate the two cases.
+Waiting-for-a-human and already-told-no are identical from inside the helper:
+both are silent, both return `noErr`, neither shows a dialog. The only thing
+that tells them apart is the samples, which is why the constant-signal probe is
+not a redundant second opinion on the timeout — it is the sole discriminator for
+a case the timeout is structurally blind to.
+
+**And the two TCC services are genuinely independent.** Measured on one machine
+at one moment: the system tap granted and delivering 44100 Hz while the
+microphone was denied. `kTCCServiceAudioCapture` and `kTCCServiceMicrophone` are
+separate decisions and granting one does not grant the other, so a recording can
+have a perfectly good far end and no operator at all — which is exactly the
+half-meeting this project has now shipped twice.
+
 ### ~~The check for a denied microphone could not fire~~ — fixed, and it had shipped
 
 The constant-signal check above was published in a state where it **could never
