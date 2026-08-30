@@ -12,13 +12,14 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- nobody: system audio is INTERMITTENT, not dead · live in 2 runs, empty in ~20, tone verified playing · no variable found
+- nobody: system tap is BIMODAL · 20/20 delivered then 0/20, same command minutes apart · state variable unknown
 - wsl: ~5.2 GB of recordings there · the Mac's 254 MB is gone, retention ran and worked · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
+- 2026-08-30 the tap is bimodal, not probabilistic. Twenty consecutive captures delivered, then twenty consecutive delivered nothing, same command and same playing tone minutes apart. It holds a state across a run of attempts rather than failing at random, which is why single runs all afternoon looked like a clean before-and-after. The rate measurement was shabadoo's suggestion and it produced something better than a rate.
 - 2026-08-30 the mic works end to end. Consent granted (authValue=2, authReason=2), shipping binary captures 96193 distinct values, preflight passes for the first time on this machine. The entitled-helper variant is indistinguishable, so the responsible-process finding survives its own fix.
 - 2026-08-30 "system audio is dead" was wrong; it is INTERMITTENT. Live in two runs (229376 samples, 110178 distinct) and empty in roughly twenty others across two hours, with afplay verified running each time. Duration does not control it, capturing both tracks does not control it, and preflight reported "carrying signal" in the same minute three manual runs reported nothing. Intermittent is a different defect from dead and harder; recorded as unexplained rather than closed.
 - 2026-08-30 retracted: "audio capture is broken below both projects". ffmpeg failed to open the mic only because consent was pending. The independent oracle was right; the conclusion drawn from it was not.
