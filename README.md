@@ -1,5 +1,10 @@
 # minutes
 
+[![tag](https://img.shields.io/github/v/tag/alexj212/minutes?label=tag&color=blue)](https://github.com/alexj212/minutes/tags)
+[![license](https://img.shields.io/github/license/alexj212/minutes?color=blue)](LICENSE)
+[![go](https://img.shields.io/github/go-mod/go-version/alexj212/minutes)](go.mod)
+[![capture](https://img.shields.io/badge/capture-Windows%20%C2%B7%20macOS-blue)](#what-works)
+
 Records a meeting from a desktop — **both sides of it** — so that afterwards
 somebody can answer what was decided.
 
