@@ -12,7 +12,7 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- you: upgrade shabadoo to v0.4.71, restart the node · entitled build is out, no Mac mic until it runs · one restart
+- shabadoo: pushing v0.4.71 to this node · Alex authorised it, task filed, restart may end this session · in flight
 - wsl: ~5.2 GB of recordings there · the Mac's 254 MB is gone, retention ran and worked · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
