@@ -13,8 +13,8 @@ by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
 - you: mic grant on the Mac · attribution unproven on darwin · one click in System Settings
-- you: 5.2 GB here and 224 MB there, recordings of you and your home · no retention has ever run · one command
-- you: devops half-meeting · a filed transcript is missing your side and does not say so · re-send or amend it
+- you: 5.4 GB of recordings across two machines · no retention has ever run · one command
+- you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
 - nobody: macOS recording indicator · the consent dialog names the launcher, not us · NSStatusBar + signing
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
