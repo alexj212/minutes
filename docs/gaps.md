@@ -436,6 +436,25 @@ binary signed three ways — hardened with the entitlement, unhardened without,
 and hardened without — delivered 96256 samples, 1 distinct value, all zeros
 every time. **The accessing process's signature is not the lever.**
 
+**It was first reported as a regression in that day's build, and it is not** —
+minutes-mac retracted that themselves. The hardened runtime arrived with
+signing itself, twenty-five releases earlier; the correlation was between a
+file's mtime and a symptom.
+
+The real mechanism is better than either guess, and it is in the log's own
+wording: *failed to match **existing** code requirement.* **A grant was already
+there.** The launcher's first real signature invalidated the requirement that
+grant had been recorded against, so re-consent became necessary — which is
+exactly the moment the missing entitlement forbids a prompt. Signing was adopted
+on both sides of this fleet to make TCC grants durable. Here it is what turned a
+recoverable grant into an unaskable one, and every API call kept returning
+success throughout.
+
+**That is the shape worth keeping: the fix for the first problem created the
+conditions for the second.** Neither change was wrong on its own terms, and
+nothing in either project could see the interaction — it is visible only in a
+log belonging to neither.
+
 Nothing in the capture path separates an answered "no" from a forbidden prompt:
 both arrive as a constant signal. So the advice enumerates what it cannot
 distinguish and hands over the `log show` predicate that does distinguish them,

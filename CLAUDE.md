@@ -228,6 +228,15 @@ unhardened-without, and hardened-without all delivered the identical 96256
 zeros. So a launcher's build settings can make this machine uncapturable while
 every one of our own checks reports exactly what it should.
 
+**And it is reached by the fix for the previous problem**, which is why it is
+worth reading twice. The log's wording is *failed to match existing code
+requirement*: a grant was already there, the launcher's first real signature
+invalidated the requirement it had been recorded against, and re-consent became
+necessary — which is exactly the moment a missing entitlement forbids the
+prompt. Signing was adopted across this fleet to make grants durable; here it
+turned a recoverable grant into an unaskable one. Neither change was wrong on
+its own terms and neither project could see the interaction.
+
 **TCC records the grant against the responsible process, not the helper.** The
 dialog names whatever launched it — here the session coordinator — and
 `minutes-capture` appears nowhere in System Settings. It works, and it discloses

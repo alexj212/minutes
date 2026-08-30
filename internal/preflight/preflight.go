@@ -571,8 +571,14 @@ const (
 // not exist. macOS can refuse to *ask*: when the responsible process is built
 // with the hardened runtime and without `com.apple.security.device.audio-input`,
 // no dialog is ever raised, so there is nothing to enable and toggling the entry
-// that is there changes nothing. Measured by minutes-mac in TCC's own log,
-// against a launcher that had shipped that way the same day.
+// that is there changes nothing. Measured by minutes-mac in TCC's own log.
+//
+// And it is reached by the fix for the *previous* problem. The log's words are
+// "failed to match **existing** code requirement": a grant was already there,
+// the launcher's first real signature invalidated the requirement it had been
+// recorded against, so re-consent became necessary — which is precisely the
+// moment a missing entitlement forbids the prompt. Signing was adopted to make
+// grants durable and it is what made this one unrecoverable.
 //
 // Nothing in the capture path can tell the two causes apart: an answered "no"
 // and a forbidden prompt both arrive as a constant signal. So this enumerates
