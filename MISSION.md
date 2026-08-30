@@ -1,7 +1,7 @@
 # Records both sides of a desktop meeting, transcribes it, and hands a session the material to write notes from.
 status: active
 owner: minutes-mac
-updated: 2026-08-29
+updated: 2026-08-30
 
 ## Now
 Windows is in daily use. macOS capture is built and proven end to end — segment
@@ -12,7 +12,7 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- you: mic grant on the Mac · attribution unproven on darwin · one click in System Settings
+- you: mic is TCC-denied, not unasked · 96256 samples, 1 distinct value, all zero · one click
 - you: 5.4 GB of recordings across two machines · no retention has ever run · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
@@ -20,6 +20,8 @@ by a peer or by real audio rather than by the test suite.
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
+- 2026-08-30 a denied mic never prompts again: macOS remembers a deny as it remembers a grant, so no dialog appears and every call returns success. "No dialog" is not evidence of a grant, and `waiting` cannot catch this — only the constant-signal probe separates told-no from waiting-for-a-human.
+- 2026-08-30 the two TCC services are independent in practice: the system tap delivers 44100 Hz while the mic is denied on the same machine. Granting audio capture does not grant the microphone.
 - 2026-08-29 preflight refuses a denied microphone. The first version could not fire — os/exec hands a closed stdin, so the helper stopped before capturing. A check that cannot fire is indistinguishable from one that passes.
 - 2026-08-29 a denied mic opens, starts and returns zeros; preflight now refuses on a constant signal rather than a quiet one.
 - 2026-08-29 echo escapes are segmentation divergence, not short fragments; fixed by longest shared word run, threshold measured across 700+ real lines rather than chosen.

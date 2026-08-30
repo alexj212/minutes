@@ -196,6 +196,28 @@ So every setup call is bounded and a timeout is reported as its own outcome.
 Without that the helper produces no report at all and the operator is told "the
 capture helper produced no report", which is true and useless.
 
+**That is the *undecided* case. A decided "no" behaves in the opposite
+direction, and the two need separating.** macOS remembers a denial exactly as
+it remembers a grant, so a denied device never prompts again: nothing blocks,
+no dialog appears, and every call returns success. Measured on the target Mac
+with the microphone denied — the helper opened the device, emitted `TRACK_INFO`
+at 48000 Hz, delivered 188 audio packets and exited **zero**. Of the 96256
+samples in them there was exactly **1 distinct value**, and it was 0.
+
+So the platform gives you a hang when it wants an answer and a clean success
+when it already has one, which means **"no dialog appeared" is not evidence of
+a grant** and the `waiting` state cannot catch this at all: from inside the
+helper, told-no is indistinguishable from working-and-quiet. Only looking at
+the samples separates them, which is why preflight probes the microphone and
+refuses on an unvarying signal rather than a silent one — a quiet room still
+has a noise floor, and a constant signal is a device that is not listening.
+
+The two services are also independent in practice, not just in name: on that
+same machine the tap was delivering system audio at 44100 Hz while the
+microphone returned zeros. **`kTCCServiceAudioCapture` does not carry
+`kTCCServiceMicrophone` with it**, so a machine that has proven it can record
+the far end has proven nothing about recording the operator.
+
 **TCC records the grant against the responsible process, not the helper.** The
 dialog names whatever launched it — here the session coordinator — and
 `minutes-capture` appears nowhere in System Settings. It works, and it discloses
