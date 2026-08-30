@@ -471,6 +471,47 @@ rather than picking one. **A wrong remedy stated confidently costs more than an
 honest list, because it gets followed.**
 
 
+### ~~Two zero values rendered as blanks where a name was defined~~ — fixed
+
+The rule this project sent to the fleet, asked of this project. shabadoo took
+*"make the zero value the unknown one"* into the payload, audited their own repo
+against it first, and found a live instance in code they had shipped an hour
+earlier. So the same question was asked here, and it found two.
+
+**A line with no speaker printed a bare colon.** `Line.Speaker` is a string, so
+its zero value is `""` — not one of the three labels — and the renderer wrote
+`l.Speaker + ":"`, producing an unlabelled line indistinguishable from a
+formatting fault, in a document whose entire claim is who said what.
+
+Reachable rather than theoretical, and that was traced rather than assumed:
+`transcript.Load` reads `transcript.json` back from disk and `minutes deliver`
+renders it, so a file written by any build that left the field unset — or one
+somebody edited — arrives at that line.
+
+**The sharper half is that `Count` already got it right and the renderer did
+not.** `Count` defaulted an unrecognised speaker to `Unattributed`; the
+renderer printed nothing. So a brief saying *"2 unattributed"* could sit over a
+transcript body showing two blank labels — **a disclosure disagreeing with the
+document it describes**, which a reader resolves as a glitch rather than as a
+claim. Both now go through one `SpeakerLabel`, which is the same fix `Count`
+itself was: decide once, in one place, so two call sites cannot drift.
+
+The column was widened while there. `%-6s` against a 13-character
+`Unattributed:` had been pushing the text out of alignment on every recording
+that could not attribute its lines — which is to say, on exactly the recordings
+whose formatting most needed to look deliberate.
+
+**And a manifest with no state listed as an empty cell.** `StateLabel` returned
+`string(s.State)`, so a manifest carrying no state at all — an older file, a
+partial write — rendered as a blank column in `minutes list`, reading as a
+column that failed to draw rather than as a recording whose state is unknown.
+It says `unknown` now.
+
+Neither was found by review, and neither is a new defect: both predate the rule
+and were invisible until somebody asked the type what it says when nobody has
+set it. **The default-construction path is a case, and it is the one no test
+constructs** — every test builds the struct deliberately and sets the field.
+
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
 `-999` means "there was no signal to measure" and was printed as

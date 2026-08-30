@@ -330,3 +330,28 @@ func TestTranscribingWithNoProcessReadsAsInterrupted(t *testing.T) {
 		t.Errorf("StateLabel = %q, want interrupted", got)
 	}
 }
+
+// A manifest carrying no state is not a recording in some fifth condition, it
+// is one nothing established — and the listing printed a blank cell for it,
+// which reads as a column that failed to render.
+//
+// The same shape as the transcript's blank speaker, found the same way: by
+// asking what the type says when nobody has set it.
+func TestAManifestWithNoStateReadsAsUnknownNotBlank(t *testing.T) {
+	s := Status{Manifest: &manifest.Manifest{}, Live: false}
+	if got := s.StateLabel(); got != "unknown" {
+		t.Errorf("StateLabel() = %q, want %q — a blank cell is indistinguishable "+
+			"from a rendering fault", got, "unknown")
+	}
+	// The four real states still speak for themselves.
+	for _, st := range []manifest.State{
+		manifest.StateRecording, manifest.StateTranscribing,
+		manifest.StateStopped, manifest.StateFailed,
+	} {
+		live := st == manifest.StateRecording || st == manifest.StateTranscribing
+		s := Status{Manifest: &manifest.Manifest{State: st}, Live: live}
+		if got := s.StateLabel(); got != string(st) {
+			t.Errorf("StateLabel() = %q for %q, want %q", got, st, st)
+		}
+	}
+}

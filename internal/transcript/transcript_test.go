@@ -887,3 +887,42 @@ func TestSkippedSilentSegmentsAreDisclosed(t *testing.T) {
 		t.Errorf("a complete transcript claims segments were skipped:\n%s", full.Text())
 	}
 }
+
+// The zero value of Speaker is "", which is not one of the three labels — so a
+// line nothing set rendered as a bare ":" beside its text, indistinguishable
+// from a formatting fault, in a document whose whole claim is who said what.
+//
+// Reachable rather than theoretical: Load reads transcript.json back and
+// `minutes deliver` renders it, so a file written by a build that left the
+// field unset arrives here.
+//
+// Found by asking a rule this project sent to the fleet — make the zero value
+// the unknown one — of its own code.
+func TestALineWithNoSpeakerIsLabelledUnattributedNotBlank(t *testing.T) {
+	tr := &Transcript{Lines: []Line{
+		{Start: 0, Speaker: SpeakerYou, Text: "mine"},
+		{Start: 1, Text: "nothing set this"},
+		{Start: 2, Speaker: "room", Text: "a speaker this build does not know"},
+	}}
+	out := tr.Text()
+
+	if strings.Contains(out, "]      : ") || strings.Contains(out, "] : ") {
+		t.Errorf("an unset speaker renders as a bare colon:\n%s", out)
+	}
+	if n := strings.Count(out, SpeakerUnattributed+":"); n != 2 {
+		t.Errorf("got %d Unattributed labels, want 2 — an unset speaker and an "+
+			"unrecognised one are both cases this build cannot attribute:\n%s", n, out)
+	}
+
+	// And the tally must agree with the body. They disagreed before: Count
+	// defaulted to Unattributed while the renderer printed nothing, so a brief
+	// saying "2 unattributed" sat over two blank labels and read as a glitch.
+	c := Count(tr.Lines)
+	if c.You != 1 || c.Unattributed != 2 || c.Others != 0 {
+		t.Errorf("Count = %+v, want 1 you / 2 unattributed / 0 others", c)
+	}
+	if got := strings.Count(out, SpeakerUnattributed+":"); got != c.Unattributed {
+		t.Errorf("the body shows %d unattributed lines and the tally says %d — "+
+			"a disclosure disagreeing with the document it describes", got, c.Unattributed)
+	}
+}

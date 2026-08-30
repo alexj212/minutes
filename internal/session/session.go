@@ -205,6 +205,13 @@ func (s Status) StateLabel() string {
 	if s.Interrupted() {
 		return "interrupted"
 	}
+	// A manifest carrying no state at all is not a recording in some fifth
+	// condition — it is one nothing established. Returning the empty string put
+	// a blank cell in the listing, which reads as a column that failed to
+	// render rather than as a recording whose state is unknown.
+	if s.State == "" {
+		return "unknown"
+	}
 	return string(s.State)
 }
 

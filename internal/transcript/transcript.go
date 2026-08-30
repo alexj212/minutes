@@ -221,7 +221,7 @@ type Tally struct {
 func Count(lines []Line) Tally {
 	var t Tally
 	for _, l := range lines {
-		switch l.Speaker {
+		switch SpeakerLabel(l.Speaker) {
 		case SpeakerYou:
 			t.You++
 		case SpeakerOthers:
@@ -231,6 +231,35 @@ func Count(lines []Line) Tally {
 		}
 	}
 	return t
+}
+
+// SpeakerLabel is what to print for a stored speaker, and it names the unknown
+// case rather than leaving it blank.
+//
+// The zero value of a Line's Speaker is "", which is not one of the three
+// labels — so a Line nothing set rendered as a bare ":" with the text beside
+// it, indistinguishable from a formatting fault. That is reachable rather than
+// theoretical: Load reads transcript.json back from disk and `minutes deliver`
+// renders it, so a file written by any build that left the field unset, or one
+// somebody edited, arrives here.
+//
+// Worse, Count already defaulted an unrecognised speaker to Unattributed while
+// the renderer did not, so the brief said "3 unattributed" over a transcript
+// showing three blank labels — a disclosure and a body disagreeing, which reads
+// as a glitch rather than as a claim. Both go through here now, which is the
+// same fix Count itself was: decide once, in one place.
+//
+// Found by asking a rule this project sent to the fleet — make the zero value
+// the unknown one — of its own code, after shabadoo asked it of theirs and
+// found an instance an hour old.
+func SpeakerLabel(speaker string) string {
+	switch speaker {
+	case SpeakerYou:
+		return SpeakerYou
+	case SpeakerOthers:
+		return SpeakerOthers
+	}
+	return SpeakerUnattributed
 }
 
 // job is one segment queued for transcription.
@@ -671,7 +700,7 @@ func (t *Transcript) Text() string {
 		if g, ok := marked[i]; ok {
 			fmt.Fprintf(&b, "\n%s\n", describeSilence(g))
 		}
-		fmt.Fprintf(&b, "[%s] %-6s %s\n", clock(l.Start), l.Speaker+":", l.Text)
+		fmt.Fprintf(&b, "[%s] %-14s %s\n", clock(l.Start), SpeakerLabel(l.Speaker)+":", l.Text)
 	}
 	return b.String()
 }
