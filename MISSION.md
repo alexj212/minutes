@@ -12,7 +12,7 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- shabadoo: v0.4.65 runs hardened with no audio-input entitlement · macOS refuses to prompt, so no mic on any Mac · one entitlement
+- shabadoo: hardened runtime, no audio-input entitlement · macOS will not prompt, no mic on any Mac · one entitlement
 - you: 5.4 GB of recordings across two machines · no retention has ever run · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
