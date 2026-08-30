@@ -12,7 +12,7 @@ reporting success without having established anything, and every one was found
 by a peer or by real audio rather than by the test suite.
 
 ## Waiting on
-- you: mic is TCC-denied, not unasked · 96256 samples, 1 distinct value, all zero · one click
+- shabadoo: v0.4.65 runs hardened with no audio-input entitlement · macOS refuses to prompt, so no mic on any Mac · one entitlement
 - you: 5.4 GB of recordings across two machines · no retention has ever run · one command
 - you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
 - you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
@@ -20,6 +20,8 @@ by a peer or by real audio rather than by the test suite.
 - nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
 
 ## Log
+- 2026-08-30 the mic is not denied, it is unaskable. shabadoo v0.4.65 (built 14:14) signs with hardened runtime and no `com.apple.security.device.audio-input`; TCC logs "Policy disallows prompt" and refuses to raise a dialog at all. Signing adopted to make grants durable removed the capability instead, while every call kept returning success.
+- 2026-08-30 the helper's signature is not the lever: three variants — hardened+entitlement, no-hardened, and shipping — all returned 96256 samples of 1 distinct value. Responsibility is the variable, as this file already said and we had drifted from believing.
 - 2026-08-30 a denied mic never prompts again: macOS remembers a deny as it remembers a grant, so no dialog appears and every call returns success. "No dialog" is not evidence of a grant, and `waiting` cannot catch this — only the constant-signal probe separates told-no from waiting-for-a-human.
 - 2026-08-30 the two TCC services are independent in practice: the system tap delivers 44100 Hz while the mic is denied on the same machine. Granting audio capture does not grant the microphone.
 - 2026-08-29 preflight refuses a denied microphone. The first version could not fire — os/exec hands a closed stdin, so the helper stopped before capturing. A check that cannot fire is indistinguishable from one that passes.
