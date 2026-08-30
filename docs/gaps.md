@@ -512,6 +512,51 @@ and were invisible until somebody asked the type what it says when nobody has
 set it. **The default-construction path is a case, and it is the one no test
 constructs** — every test builds the struct deliberately and sets the field.
 
+### ~~The comment named the fatal state and the else branch entered it~~ — fixed, and unbuilt here
+
+`audio.swift` says, in the paragraph immediately above the code:
+
+    // A tap-only aggregate creates and starts without error and then
+    // delivers nothing, which is the enumerate-versus-start failure this
+    // project exists to refuse.
+
+and then twenty lines later built exactly that, silently:
+
+    let outUID = deviceUID(defaultDevice(input: false)) ?? ""
+    ...
+    } else {
+        aggDesc[kAudioAggregateDeviceSubDeviceListKey] = []
+    }
+
+The `?? ""` collapsed **three outcomes into one**: the default output device
+could not be found, the device was found and its UID could not be read, and the
+UID read fine. The first two took the else branch into the aggregate the
+sentence above calls unacceptable — created, started, exit 0, `TRACK_INFO`
+emitted, sample rate correct, and **no audio packets ever**. Indistinguishable
+from a working track until somebody counts samples, and sticky, because
+whatever broke the lookup persists.
+
+Found by minutes-mac reading the file while hunting an unrelated fault. What
+makes the report usable is that they then established it was **not** that fault
+rather than letting a plausible mechanism stand: a small Swift probe doing the
+identical two lookups against the live machine returned `OSStatus 0, id 78,
+outUID "BuiltInSpeakerDevice"`. The correct branch is being taken. *"I wanted
+it to be the answer. It is not, and saying so is cheaper than you finding out
+after changing it."*
+
+It now refuses, with the two causes kept apart and each reaching the report, so
+preflight can say which. **Refusing costs nothing real** — a Mac with no usable
+default output device has no system audio to capture — while opening anyway
+costs a meeting, discovered afterwards.
+
+**And this repo cannot verify its own fix.** There is no Swift toolchain on the
+WSL node: `make helper` there builds the Windows `.exe`, `make test` is Go only,
+and every guard stayed green over an edit to a file none of them can read. So
+the same shape holds at the level of the repository — *a check that cannot fire
+looks exactly like a check that passes* — and the only thing standing behind a
+darwin change is the other node building it. That is the pair-as-test-rig
+arrangement working, and it is not automation.
+
 ### ~~A sentinel was printed in the units of a measurement~~ — fixed
 
 `-999` means "there was no signal to measure" and was printed as

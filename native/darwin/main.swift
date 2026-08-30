@@ -134,6 +134,14 @@ func runPreflight(micOnly: Bool, systemOnly: Bool, appPID: pid_t?) -> Int32 {
                 // carrying both would be read as broken, and the operator would
                 // go looking for something to fix.
                 sys.waiting = "system audio capture is waiting for permission — look for a dialog"
+            } else if !s.clockSourceError.isEmpty {
+                // A refusal with a cause the operator can act on, kept apart
+                // from the generic one. The tap itself was created fine; what
+                // failed is the aggregate's clock source, and saying "the tap
+                // could not be created" would send somebody after the wrong
+                // thing.
+                sys.error = s.clockSourceError
+                sys.status = describe(openStatus)
             } else {
                 sys.error = "the system audio tap could not be created"
                 sys.status = describe(openStatus)
@@ -208,9 +216,14 @@ func runCapture(micOnly: Bool, systemOnly: Bool, durationMs: Int, appPID: pid_t?
         let s = SystemCapture(appPID: appPID)
         let st = s.open()
         if st != noErr {
-            let why = st == kAudioDevicePermissionsError
-                ? "system audio capture is waiting for permission and nothing answered it"
-                : "system audio tap could not be created: \(describe(st))"
+            let why: String
+            if st == kAudioDevicePermissionsError {
+                why = "system audio capture is waiting for permission and nothing answered it"
+            } else if !s.clockSourceError.isEmpty {
+                why = "system audio: \(s.clockSourceError)"
+            } else {
+                why = "system audio tap could not be created: \(describe(st))"
+            }
             FrameWriter.shared.log(track: .system, why)
             failures.append("system: \(describe(st))")
             s.close()

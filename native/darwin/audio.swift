@@ -350,6 +350,22 @@ final class SystemCapture: @unchecked Sendable {
     /// does different things about them. Reusing one status for both is the
     /// collapse the waiting state exists to prevent.
     private(set) var timedOutWaiting = false
+    /// Why the default output device could not serve as the aggregate's clock
+    /// source, when it could not. Empty when it could.
+    ///
+    /// Same argument as timedOutWaiting one layer down. Three outcomes used to
+    /// collapse into one empty string — the device could not be found, the
+    /// device was found and its UID could not be read, and the UID read fine —
+    /// and the first two silently built the tap-only aggregate the comment in
+    /// open() calls fatal. That aggregate creates, starts, and delivers
+    /// nothing, so the track looked identical to a working one until somebody
+    /// counted samples.
+    ///
+    /// Found by minutes-mac reading this file while hunting a different fault,
+    /// who then wrote a Swift probe against the live machine to establish it
+    /// was NOT that fault rather than assuming: OSStatus 0, id 78, outUID
+    /// "BuiltInSpeakerDevice". Latent, never fired, and reported anyway.
+    private(set) var clockSourceError = ""
 
     init(appPID: pid_t?) {
         self.processScoped = appPID != nil
@@ -396,24 +412,38 @@ final class SystemCapture: @unchecked Sendable {
         // default output is never changed. A tap-only aggregate creates and
         // starts without error and then delivers nothing, which is the
         // enumerate-versus-start failure this project exists to refuse.
-        let outUID = deviceUID(defaultDevice(input: false)) ?? ""
-        var aggDesc: [String: Any] = [
+        //
+        // Refusing, not falling back. The `?? ""` that used to be here turned
+        // both lookup failures into the empty string and then took the else
+        // branch into exactly the aggregate the paragraph above calls fatal —
+        // the one state this file names as unacceptable, entered silently by
+        // the code beneath the sentence naming it.
+        //
+        // Refusing costs nothing real: a Mac with no usable default output
+        // device has no system audio to capture in the first place. Opening
+        // anyway costs a whole meeting, discovered afterwards.
+        let outDev = defaultDevice(input: false)
+        if outDev == kAudioObjectUnknown {
+            clockSourceError = "there is no default output device, so the tap would have no clock source"
+            return kAudioHardwareBadDeviceError
+        }
+        guard let outUID = deviceUID(outDev), !outUID.isEmpty else {
+            clockSourceError = "the default output device has no readable UID, so the tap would have no clock source"
+            return kAudioHardwareUnspecifiedError
+        }
+        let aggDesc: [String: Any] = [
             kAudioAggregateDeviceNameKey: "minutes capture",
             kAudioAggregateDeviceUIDKey: "minutes-\(UUID().uuidString)",
             kAudioAggregateDeviceIsPrivateKey: true,
             kAudioAggregateDeviceIsStackedKey: false,
             kAudioAggregateDeviceTapAutoStartKey: true,
+            kAudioAggregateDeviceMainSubDeviceKey: outUID,
+            kAudioAggregateDeviceSubDeviceListKey: [[kAudioSubDeviceUIDKey: outUID]],
             kAudioAggregateDeviceTapListKey: [[
                 kAudioSubTapDriftCompensationKey: true,
                 kAudioSubTapUIDKey: desc.uuid.uuidString,
             ]],
         ]
-        if !outUID.isEmpty {
-            aggDesc[kAudioAggregateDeviceMainSubDeviceKey] = outUID
-            aggDesc[kAudioAggregateDeviceSubDeviceListKey] = [[kAudioSubDeviceUIDKey: outUID]]
-        } else {
-            aggDesc[kAudioAggregateDeviceSubDeviceListKey] = []
-        }
 
         var agg = AudioObjectID(kAudioObjectUnknown)
         st = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &agg)
