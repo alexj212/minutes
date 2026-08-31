@@ -516,6 +516,23 @@ on someone else's operating system is not.
   Claude session reads before driving this tool, so a change to the commands is
   a change to it — in the same commit. `cmd/minutes/skill_test.go` pins it
   against `main()`'s dispatch rather than trusting that anybody remembered.
+
+  **This file is the source; shabadoo's payload vendors from it, never the
+  reverse.** That is forced rather than chosen: the skill is pinned to this
+  CLI's own dispatch by a test that can only run where the commands are, and
+  shabadoo cannot run it. **So a fix written into the installed copy at
+  `~/.claude/skills/minutes/` survives exactly until the next vendor** — which
+  is the same hazard the global config already documents about hand-scrubbing
+  vendored files, recurring one level up.
+
+  It has happened, and behind a safety rule: after a root password nearly
+  reached a work remote, the transcripts-are-credential-stores section was
+  written into the payload copy and shipped, while the file named here — the
+  interface of record — did not contain it. Both copies were being edited as
+  though each were authoritative, by different sessions, with nothing comparing
+  them. shabadoo now fails a check while the two differ, deliberately rather
+  than auto-copying: a mechanical sync that day would have deleted the safety
+  rule instead of adopting it.
 - **Verify against a real device before believing a design.** Everything in the
   platform table above was checked on the actual machines; the parts that were
   reasoned about instead were the parts that turned out wrong.
