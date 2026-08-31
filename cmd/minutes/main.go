@@ -560,6 +560,28 @@ func announce(m *manifest.Manifest) {
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "  (could not write the recording marker: %v)\n", err)
 	}
+	// And in the recording directory, which is where `list` looks.
+	//
+	// The reasoning was already written down 500 lines below, about the
+	// transcription phase: "a 'transcribing' directory with no live process is
+	// how an *interrupted* transcription is detected, and without this a
+	// perfectly healthy one would be reported as interrupted the moment anybody
+	// looked." Exactly the same is true of the recording phase and only the
+	// second half of the run ever got the file.
+	//
+	// `minutes start` was unaffected — session.Start writes the pid of the
+	// supervisor it spawns — so this only ever bit `minutes record`, whose
+	// supervisor is this process and which wrote nothing.
+	//
+	// The cost of getting it wrong is the bad direction: a LIVE recording
+	// listed as `interrupted` invites recovery. Observed rather than reasoned
+	// about — a meeting in progress was reported interrupted and transcribed
+	// mid-flight on the strength of it, while the audio was still being
+	// written.
+	if err := os.WriteFile(filepath.Join(m.Dir(), session.PIDFile),
+		[]byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		fmt.Fprintf(os.Stderr, "  (could not write the recorder pid file: %v)\n", err)
+	}
 	what := m.Name
 	if what == "" {
 		what = m.ID
@@ -574,6 +596,10 @@ func unannounce(m *manifest.Manifest) {
 	if err := session.ClearMarker(); err != nil {
 		fmt.Fprintf(os.Stderr, "  (could not clear the recording marker: %v)\n", err)
 	}
+	// Paired with the write in announce. The supervise path removes it again
+	// later for its own reasons; os.Remove on a missing file is not an error
+	// worth reporting.
+	_ = os.Remove(filepath.Join(m.Dir(), session.PIDFile))
 	what := m.Name
 	if what == "" {
 		what = m.ID

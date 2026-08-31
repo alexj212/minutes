@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -353,5 +354,49 @@ func TestAManifestWithNoStateReadsAsUnknownNotBlank(t *testing.T) {
 		if got := s.StateLabel(); got != string(st) {
 			t.Errorf("StateLabel() = %q for %q, want %q", got, st, st)
 		}
+	}
+}
+
+// A live recording must never list as `interrupted`, and this is the direction
+// that matters: `interrupted` invites recovery, and a recording being recovered
+// is one being read, transcribed, or removed while it is still running.
+//
+// Observed rather than reasoned about. `minutes record` wrote no pid file, so
+// PID() returned (0, false) for a meeting that was actively writing segments,
+// Live was false, the manifest said "recording", and Interrupted() was true.
+// The listing said `interrupted` for a meeting in progress and it was
+// transcribed mid-flight on the strength of that.
+//
+// `minutes start` was never affected — session.Start writes the pid of the
+// supervisor it spawns — which is why every test and every use of `start`
+// looked fine.
+func TestALiveRecordingIsNotReportedAsInterrupted(t *testing.T) {
+	dir := t.TempDir()
+	m := &manifest.Manifest{State: manifest.StateRecording}
+
+	// No pid file: what `record` used to leave behind.
+	if _, alive := PID(dir); alive {
+		t.Fatal("PID reported a live supervisor with no pid file")
+	}
+	if !(Status{Manifest: m, Live: false}).Interrupted() {
+		t.Fatal("a recording with no live supervisor should read as interrupted")
+	}
+
+	// With one naming this process — which is alive by definition here.
+	if err := os.WriteFile(filepath.Join(dir, PIDFile),
+		[]byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pid, alive := PID(dir)
+	if !alive || pid != os.Getpid() {
+		t.Fatalf("PID = (%d, %v), want (%d, true)", pid, alive, os.Getpid())
+	}
+	s := Status{Manifest: m, PID: pid, Live: alive}
+	if s.Interrupted() {
+		t.Error("a recording whose supervisor is alive reads as interrupted — " +
+			"this is what invites somebody to recover a meeting that is still happening")
+	}
+	if got := s.StateLabel(); got != string(manifest.StateRecording) {
+		t.Errorf("StateLabel() = %q, want %q", got, manifest.StateRecording)
 	}
 }

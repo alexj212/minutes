@@ -11,6 +11,56 @@ and proven, see [status.md](status.md).
 
 ## 1. Could cost you a meeting
 
+### ~~A live recording listed as `interrupted`, and something acted on it~~ — fixed, not installed
+
+**The worst instance of this project's shape so far, because it was acted on.**
+`minutes list` reported a meeting **that was happening at that moment** as
+`interrupted`, and on the strength of that word the recording was transcribed
+mid-flight while its segments were still being written.
+
+`PID(dir)` reads `recorder.pid` from the recording directory. `session.Start`
+writes it — the pid of the supervisor it spawns — so **`minutes start` was never
+affected**. `minutes record`, the foreground form, is its own supervisor and
+wrote nothing, so `PID` returned `(0, false)`, `Live` was false, the manifest
+said `recording`, and `Interrupted()` is exactly `!Live && recording`.
+
+The information was never missing. `~/.config/minutes/recording` carried the
+correct pid the whole time. It simply was not where `list` looks.
+
+**The reasoning had already been written down, 500 lines below, and applied to
+half the run.** In the transcription phase of the same function:
+
+    // A pid file alongside it, because the state alone is not enough: a
+    // "transcribing" directory with no live process is how an *interrupted*
+    // transcription is detected, and without this a perfectly healthy one
+    // would be reported as interrupted the moment anybody looked.
+
+Every word of that is true of the recording phase. Only the second half of the
+run ever got the file.
+
+**The direction of the failure is what makes it bad.** `interrupted` is not a
+neutral label — it is an invitation to recover, and the recovery actions
+available are transcribe, `rm`, and `start --force`, which respectively burn a
+GPU during a live meeting, delete it, and record it twice. The refusal on `rm
+--undelivered` would have caught one of the three.
+
+Fixed in `announce`, so the pid file has the same lifetime as the recording
+marker and both halves of the run are covered.
+
+**Two tests, because the first one did not test the fix.** The session-level
+test asserts what `PID` and `Interrupted` do given a pid file — and it passes
+with the bug still present, since the defect was never in those functions.
+Nothing creates the file was the defect, so the second test calls `announce` and
+asserts the write, with `MINUTES_MARKER` redirected because clobbering the
+machine-wide marker during a real meeting would be a worse bug than the one
+being fixed. Mutation-checked: removing the write fails the second test and not
+the first.
+
+**Not installed.** The fix is committed and `make install` has deliberately not
+been run, because a meeting is still recording and replacing the binary near a
+live capture is not a risk worth taking to fix a listing label. It installs when
+the meeting ends.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
