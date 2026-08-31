@@ -232,9 +232,14 @@ looking.
 `password|secret|token|credential` is decoration here, because the thing being
 looked for is by its nature not labelled. In the incident above the clean file
 returned zero hits — **and so would the dirty one have.** Its password was
-spoken as *"welcome 01"* with the substitutions described in words, and the only
+spoken as an ordinary two-word phrase with the substitutions described in words
+rather than typed, and the only
 keyword hit in the whole file was an unrelated garbled line nine seconds
-earlier.
+earlier. (The phrase itself is deliberately not reproduced here: it is a
+credential that has not been rotated, and a document arguing against writing
+secrets down is a poor place to keep one. The evidence does not need it — what
+makes the point is that it was ordinary words with the substitutions described
+aloud, which is exactly why nothing labelled it.)
 
 So a scan that finds nothing has established nothing. *"I do not know whether
 this is clean"* is the correct thing to write down, and the expected answer —

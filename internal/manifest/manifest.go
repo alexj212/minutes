@@ -260,6 +260,10 @@ type Manifest struct {
 	// "did I send this one?" is answerable from the recording rather than from
 	// memory.
 	Delivery *DeliveryRecord `json:"delivery,omitempty"`
+	// DeliveryHeld is why an automatic delivery did not happen. See
+	// SetDeliveryHeld: a held brief and one nobody attempted looked
+	// identical in `minutes list`, which is where people look.
+	DeliveryHeld string `json:"deliveryHeld,omitempty"`
 
 	// Error explains a failed state.
 	Error string `json:"error,omitempty"`
@@ -428,6 +432,29 @@ type DeliveryRecord struct {
 	// Degraded means the agent was unreachable and the brief was written to
 	// disk instead. It is not the same as delivered, and should not look it.
 	Degraded bool `json:"degraded,omitempty"`
+}
+
+// SetDeliveryHeld records why an automatic delivery did not happen.
+//
+// Automatic delivery declines for several good reasons — a destination that is
+// not this machine's own session, a track carrying no signal, stretches where
+// the far end was silent — and each one used to be written only to
+// `recorder.log`, which nobody opens. `minutes list` then printed a bare "—" in
+// the DELIVERED column, so **a brief deliberately held with a reason and one
+// that was never attempted looked identical in the one place people look.**
+//
+// Reported by the devops session, who worked out from the skill text that a
+// non-core destination would silently store, while a 97-minute meeting with the
+// founder was mid-transcription and about to do exactly that.
+//
+// The empty string means no hold was recorded, which is not the same as a hold
+// with no reason: a hold always carries one, because a reason nobody can read
+// is the defect being fixed.
+func (m *Manifest) SetDeliveryHeld(reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.DeliveryHeld = reason
+	return m.saveLocked()
 }
 
 // SetState moves the recording to a new state, and saves.
