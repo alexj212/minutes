@@ -1,24 +1,27 @@
 # Records both sides of a desktop meeting, transcribes it, and hands a session the material to write notes from.
 status: active
 owner: minutes-mac
-updated: 2026-08-30
+updated: 2026-08-31
 
 ## Now
-Windows is in daily use. macOS capture is built and proven end to end — segment
-rotation, crash safety and delivery all measured there — and the two-track
-attribution premise is the one claim that platform has never demonstrated. Work
-has moved from features to gates: the last five defects were one shape, a check
-reporting success without having established anything, and every one was found
-by a peer or by real audio rather than by the test suite.
+Paused mid-flight by the usage limit and assessing rather than working. A
+recording is live right now with its system track dead since 14:21 and its
+microphone still writing, which is the exact failure this project exists to
+refuse, happening while nobody was watching.
 
 ## Waiting on
-- nobody: system tap holds a STICKY dead mode · 0/90 untouched, no trigger found, mic unaffected · needs a flip caught
-- wsl: ~5.2 GB of recordings there · the Mac's 254 MB is gone, retention ran and worked · one command
-- you: the 2026-08-27 standup · a filed transcript is missing your side and does not say so · re-send or amend it
-- you: Windows smoke test · this week's wiring is unit-tested but never integrated · ~30s of recording
-- nobody: room audio during a meeting · --app removes what plays, not what the room says · unsolved
+- you: system track dead 41 min into a LIVE recording · mic still going, far end not captured · look now
+- you: rotate the root password · live, and public in git history at 77265e4 · rotate, then decide on a rewrite
+- you: installed binary is 37 commits stale · the pid and preflight fixes are absent · `make install`
+- devops: the 97-min Jeff+Jagan meeting is undelivered · 731 lines nobody has read · `minutes deliver`
+- nobody: afterStop did not fire on a 97-min recording · silent, looks exactly like success · undiagnosed
+- nobody: macOS system tap holds a sticky dead mode · 7 leads eliminated, no trigger · needs the physical Mac
 
 ## Log
+- 2026-08-31 a LIVE recording has had no system audio since 14:21 while the mic keeps writing: 24 mic segments against 14 system, process and helper both alive, marker present. One side of a meeting, in progress, with nothing saying so. Not diagnosed and not touched — assessment only.
+- 2026-08-31 `afterStop` did not fire on the 97-minute Jeff+Jagan recording (wsl). Stopped cleanly, no error, both tracks complete, transcription never started and nothing reported it. Ran by hand afterwards and it worked. Observed on the INSTALLED binary, 17bde87 of 2026-08-29 — 37 commits behind master — so the first diagnostic step is establishing which version it reproduces on.
+- 2026-08-31 the staleness guard has been warning for two days and exits 0, so `make test` prints it and passes. It works exactly as built and nobody acted on it, including me: I reported the binary as "one commit behind, on purpose" when it was 37.
+- 2026-08-31 a live unrotated root password reached the public repo in `skills/minutes/SKILL.md`, in the section arguing against writing secrets down. Removed from HEAD at 93f0645; still readable at 77265e4. Cleanup is not remediation — the rotation is the remedy.
 - 2026-08-30 99f43d9 builds and signs on the Mac — first compile of it anywhere, since WSL has no Swift toolchain and every Go guard passed over a file none of them can read. Its refusal then acted as an instrument: run in the dead mode, it does NOT fire, so the tap opens with a valid clock source and delivers nothing anyway. The clock-source hypothesis is dead across the failing mode rather than in one sample. An instrument that stays silent in the failing state tells you where the fault is not.
 - 2026-08-30 my own UID probe ran once and I accepted it as ruling the branch out, having just used bimodality to retire somebody else's test. Caught by minutes-wsl. A single negative sample under a two-mode fault separates nothing, and it is harder to see when the control is your own.
 - 2026-08-30 the dead mode is sticky, not oscillating: 90 consecutive captures over ~3 minutes with nothing touched and a tone playing gave 0/90 and logged no transition. Eliminated as triggers: a both-track capture, a preflight run, a mic-only capture, and the render client itself — afplay and `say` are equally invisible, so the tap is not blind to one app. Default output device unchanged throughout. Because the mode does not drift on its own, a single before/after around one change IS informative again, which restores the test withdrawn earlier.

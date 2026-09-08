@@ -533,6 +533,13 @@ on someone else's operating system is not.
   them. shabadoo now fails a check while the two differ, deliberately rather
   than auto-copying: a mechanical sync that day would have deleted the safety
   rule instead of adopting it.
+- **A resume is placed, not appended.** Auto-stop can stop a recording and the
+  operator can carry the same meeting on. That works only because segments are
+  addressed by absolute frame offset from a shared epoch rather than by a
+  counter: keep the epoch, and the resumed audio lands where it actually
+  happened with the gap as the silence it was. The corollary is the dangerous
+  one — a resume usually lands back in the segment it left, so that file is
+  reopened and appended to, never recreated.
 - **Verify against a real device before believing a design.** Everything in the
   platform table above was checked on the actual machines; the parts that were
   reasoned about instead were the parts that turned out wrong.

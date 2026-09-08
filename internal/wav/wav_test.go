@@ -2,6 +2,7 @@ package wav
 
 import (
 	"encoding/binary"
+	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -285,5 +286,80 @@ func TestTrimDoesNotRemoveQuietAudio(t *testing.T) {
 	}
 	if skipped != 0 {
 		t.Errorf("trimmed %v seconds starting at a non-zero sample", skipped)
+	}
+}
+
+// Reopening a segment must APPEND, because resume lands back in it.
+//
+// Segment index is derived from the absolute frame offset, so a two-minute gap
+// beginning thirty seconds into a five-minute segment resumes at 150s — the
+// same segment. NewWriter's os.Create would truncate it and the manifest entry
+// would be replaced over the top, so the audio before the gap would vanish with
+// nothing reporting it.
+func TestReopeningASegmentAppendsRatherThanTruncating(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mic-000.wav")
+	const rate, channels = 48000, 1
+
+	w, err := NewWriter(path, rate, channels)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := []int16{100, -100, 200, -200, 300}
+	if err := w.WriteAt(0, before); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := OpenWriter(path, rate, channels, 0)
+	if err != nil {
+		t.Fatalf("OpenWriter: %v", err)
+	}
+	if got := r.Frames(); got != uint64(len(before)) {
+		t.Fatalf("reopened at %d frames, want %d — it did not see what was already there", got, len(before))
+	}
+	// A gap, then more audio: exactly the resume shape.
+	if err := r.WriteAt(10, []int16{400, -400}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, got := readWAV(t, path)
+	want := []int16{100, -100, 200, -200, 300, 0, 0, 0, 0, 0, 400, -400}
+	if len(got) != len(want) {
+		t.Fatalf("file holds %d frames, want %d — the earlier run's audio was lost", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("frame %d = %d, want %d\ngot:  %v\nwant: %v", i, got[i], want[i], got, want)
+		}
+	}
+	if r.PaddedFrames != 5 {
+		t.Errorf("PaddedFrames = %d, want 5", r.PaddedFrames)
+	}
+}
+
+// Appending audio at a different rate into a file declared at another is the
+// "plays fine, 8% fast, every timestamp slides" corruption. Refuse instead.
+func TestReopeningRefusesWhenTheFormatChanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "system-000.wav")
+	w, err := NewWriter(path, 48000, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteAt(0, []int16{1, 2, 3, 4}); err != nil {
+		t.Fatal(err)
+	}
+	w.Close()
+
+	if _, err := OpenWriter(path, 44100, 2, 0); !errors.Is(err, ErrFormatChanged) {
+		t.Errorf("reopening at a different rate gave %v, want ErrFormatChanged — "+
+			"appending would produce a file that plays fine and is 8%% fast", err)
+	}
+	if _, err := OpenWriter(path, 48000, 1, 0); !errors.Is(err, ErrFormatChanged) {
+		t.Errorf("reopening at a different channel count gave %v, want ErrFormatChanged", err)
 	}
 }

@@ -123,6 +123,22 @@ func (b Brief) Body() string {
 			"other side — but this is one half of a conversation. Say so in the notes, and "+
 			"do not record the operator as having been silent.\n")
 	}
+	// Before the attribution notes, because it changes what the transcript IS
+	// rather than how good its labels are. A gap reads as people saying
+	// nothing, and a summariser has no way to tell that apart from a recorder
+	// that was switched off.
+	for _, p := range m.Pauses {
+		if p.Seconds > 0 {
+			fmt.Fprintf(&s, "- **Recording stopped for %s** at %s and was restarted: %s. "+
+				"That stretch is silence in the audio because nothing was captured, "+
+				"not because nobody spoke. Do not treat it as a lull in the meeting.\n",
+				duration(p.Seconds), clockAt(p.AtSeconds), p.Reason)
+		} else {
+			fmt.Fprintf(&s, "- **Recording stopped at %s and was never restarted**: %s. "+
+				"Anything after that point is missing from this transcript.\n",
+				clockAt(p.AtSeconds), p.Reason)
+		}
+	}
 	if t.BleedSuppressed > 0 {
 		fmt.Fprintf(&s, "- %d microphone line(s) were dropped as echoes of the system track: "+
 			"this meeting played through speakers rather than headphones, so the microphone also heard "+
@@ -173,6 +189,16 @@ func abs(parts ...string) string {
 		return out
 	}
 	return joined
+}
+
+// clockAt is an offset into the recording as mm:ss, matching the transcript's
+// own stamps so a reader can find the spot.
+func clockAt(seconds float64) string {
+	t := int(seconds + 0.5)
+	if t >= 3600 {
+		return fmt.Sprintf("%d:%02d:%02d", t/3600, (t%3600)/60, t%60)
+	}
+	return fmt.Sprintf("%d:%02d", t/60, t%60)
 }
 
 func duration(seconds float64) string {

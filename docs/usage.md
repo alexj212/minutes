@@ -374,6 +374,57 @@ It notifies rather than writing to the log, because the log is a file. On
 exactly that into `recorder.log`, the transcript was delivered with one side of
 the conversation missing, and nobody read the line for two days.
 
+### Stopping itself when nobody is there
+
+Off unless configured, because the direction it fails in is the expensive one:
+stopping a recording that is still a meeting loses the rest of it until somebody
+notices a dialog.
+
+```
+$ minutes config set silence.stopAfterSeconds 120
+silence.stopAfterSeconds: 0 → 120
+```
+
+It needs **every** track quiet. Either one alone means the opposite of what it
+looks like — a quiet microphone while the far end talks is somebody listening,
+and a quiet system track while the microphone carries speech is an ordinary
+meeting with nothing playing. And a track that has delivered *nothing* disarms
+the check rather than counting as quiet, because one dead endpoint would
+otherwise stop a meeting the other track is recording fine. That case says so:
+
+    auto-stop is not armed: system has delivered no audio at all, so there is
+    nothing to call quiet. The recording will run until it is stopped.
+
+On Windows the tray raises a dialog, its icon goes grey, and its menu becomes
+**Start recording**. Clicking that resumes **the same meeting**:
+
+    ~/minutes/2026-09-08-140312-standup/
+      mic-000.wav … mic-003.wav      before
+      ← 4m12s of padded silence →
+      mic-004.wav …                  after
+
+One directory, one manifest, one transcript. The resumed audio is placed at its
+true offset from the original epoch, so the gap is the silence it actually was
+rather than a second meeting starting at zero.
+
+Two things fall out of that and are worth knowing:
+
+- **Segment index comes from the absolute offset**, so a resume after a short
+  gap lands back in the segment it left. That file is reopened and appended to,
+  not replaced — and its peak, packet count and padding are carried forward,
+  because a segment whose loud half is before the gap must not report the quiet
+  half's peak and get skipped as too quiet to transcribe.
+- **The endpoint must not have changed.** Appending 44100 into a file declared
+  48000 is the "plays fine, 8% fast, every timestamp slides" corruption, so a
+  format change refuses the resume rather than producing it.
+
+**Where there is no indicator there is no button**, so on macOS the recording
+finishes normally instead of waiting for a click nobody can make.
+
+The pause is written into the manifest and stated in the delivery brief. Padded
+silence and a meeting nobody spoke in are identical in the audio, and the
+session writing the notes has no other way to tell them apart.
+
 ### The tray icon
 
 On Windows a red dot sits in the tray for as long as the recording runs. Right
@@ -444,6 +495,8 @@ Configure at `~/.config/minutes/config.json` (override the path with
 
 | Field | Meaning |
 |---|---|
+| `silence.stopAfterSeconds` | stop the recording after this many seconds with **every** track quiet. `0`, the default, never stops. |
+| `silence.thresholdDBFS` | what counts as quiet, e.g. `-45`. Blank uses the default. Read your room's floor from the per-segment peaks in `minutes list`. |
 | `backend` | `local-whisper` (default) or `openai`. Naming a hosted backend is the act that lets audio leave. |
 | `model` | Whisper size locally (`tiny`…`large-v3`), or an API model name. |
 | `language` | Skips language detection. Leave empty to detect. |

@@ -408,3 +408,40 @@ func TestAnUnknownDestinationIsFinalAndAMalformedRequestIsNot(t *testing.T) {
 		})
 	}
 }
+
+// A gap where the recorder was stopped reads, in the audio, exactly like a
+// stretch where nobody spoke. The session writing the notes cannot tell them
+// apart, so the brief has to.
+func TestBriefSaysWhenTheRecorderWasStopped(t *testing.T) {
+	base := func() *manifest.Manifest {
+		m := manifest.New(t.TempDir(), "2026-09-08-1400-standup", "standup", 300)
+		m.StartedAt = time.Now()
+		return m
+	}
+	tr := &transcript.Transcript{Lines: []transcript.Line{
+		{Start: 1, Speaker: transcript.SpeakerYou, Text: "morning"},
+	}}
+
+	plain := Brief{Recording: base(), Transcript: tr}.Body()
+	if strings.Contains(plain, "Recording stopped") {
+		t.Fatalf("a recording with no pauses claims one:\n%s", plain)
+	}
+
+	resumed := base()
+	resumed.Pauses = []manifest.Pause{{AtSeconds: 754, Seconds: 610, Reason: "no sound on either track"}}
+	got := Brief{Recording: resumed, Transcript: tr}.Body()
+	for _, want := range []string{"Recording stopped", "12:34", "not because nobody spoke"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the brief is missing %q:\n%s", want, got)
+		}
+	}
+
+	// Stopped and never resumed is a different claim, and the worse one: the
+	// rest of the meeting is simply absent.
+	abandoned := base()
+	abandoned.Pauses = []manifest.Pause{{AtSeconds: 754, Reason: "no sound on either track"}}
+	got = Brief{Recording: abandoned, Transcript: tr}.Body()
+	if !strings.Contains(got, "never restarted") || !strings.Contains(got, "missing from this transcript") {
+		t.Errorf("a recording that stopped and never resumed does not say so:\n%s", got)
+	}
+}

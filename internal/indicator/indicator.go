@@ -20,6 +20,8 @@ package indicator
 import (
 	"bufio"
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -41,6 +43,51 @@ type Indicator struct {
 	// dropped message the day it does.
 	read chan struct{}
 	once sync.Once
+	// start carries a resume request from the tray. Buffered, so a click that
+	// arrives while nothing is waiting is not lost — the operator clicked, and
+	// dropping it would leave them looking at a dialog that did nothing.
+	start chan struct{}
+}
+
+// Pause tells the tray the recording has stopped and offers to resume it.
+//
+// The reason is shown to the operator, because a recording that stopped on its
+// own is alarming unless it says why.
+func (i *Indicator) Pause(reason string) error {
+	if i == nil {
+		return nil
+	}
+	_, err := fmt.Fprintf(i.stdin, "PAUSED %s\n", strings.ReplaceAll(reason, "\n", " "))
+	return err
+}
+
+// Resume tells the tray recording has started again.
+func (i *Indicator) Resume() error {
+	if i == nil {
+		return nil
+	}
+	_, err := io.WriteString(i.stdin, "RECORDING\n")
+	return err
+}
+
+// WaitForStart blocks until the operator asks to resume, and reports whether
+// they did. False means the context ended first — the recording is over.
+//
+// A nil Indicator returns false immediately: with nothing on screen there is no
+// button to press, and waiting would hold a finished meeting open forever.
+func (i *Indicator) WaitForStart(ctx context.Context) bool {
+	if i == nil {
+		return false
+	}
+	select {
+	case <-i.start:
+		return true
+	case <-i.read:
+		// The tray exited. Nothing is going to arrive.
+		return false
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // Options configures one.
@@ -125,7 +172,7 @@ func Start(ctx context.Context, opt Options) (*Indicator, error) {
 	}
 	r.Close()
 
-	ind := &Indicator{cmd: cmd, stdin: w, read: make(chan struct{})}
+	ind := &Indicator{cmd: cmd, stdin: w, read: make(chan struct{}), start: make(chan struct{}, 1)}
 
 	go func() {
 		defer close(ind.read)
@@ -134,6 +181,12 @@ func Start(ctx context.Context, opt Options) (*Indicator, error) {
 			switch strings.TrimSpace(sc.Text()) {
 			case "READY":
 				opt.Log("recording is showing in the tray")
+			case "START":
+				opt.Log("resume requested from the tray")
+				select {
+				case ind.start <- struct{}{}:
+				default:
+				}
 			case "STOP":
 				opt.Log("stop requested from the tray")
 				if opt.OnStop != nil {

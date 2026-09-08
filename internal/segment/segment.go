@@ -64,9 +64,32 @@ type Writer struct {
 	haveCur      bool
 	framesToSync uint64
 
+	// prior is what the manifest held for curIndex before this writer reopened
+	// it, and resuming says whether there was anything. Empty and unknown are
+	// different: a zero-valued prior with resuming false must not be merged in
+	// as though it were measured.
+	prior    manifest.Segment
+	resuming bool
+
 	// OnSegment is called when a segment opens and again when it closes, so the
 	// manifest on disk always names the file currently being written.
 	OnSegment func(manifest.Segment) error
+
+	// PriorSegment reports what the manifest already holds for an index, when
+	// this writer is resuming a recording that was stopped and restarted.
+	//
+	// Segment index is derived from the absolute frame offset, so a resume
+	// after a two-minute gap usually lands back in the SAME five-minute
+	// segment. Without this the writer would replace that file and its manifest
+	// entry, and everything the earlier run recorded in it would be gone with
+	// nothing saying so.
+	//
+	// It also carries the counters forward. They are per-segment totals, and a
+	// reopened segment that reported only the new run's numbers would understate
+	// its packets and its padding — and, worse, report the quieter peak, which
+	// is what decides whether the segment is transcribed at all. A segment
+	// holding speech from before the gap would be skipped as too quiet.
+	PriorSegment func(index int) (manifest.Segment, bool)
 }
 
 // NewWriter creates a segmented writer. segmentSeconds must be positive.
@@ -199,13 +222,22 @@ func (w *Writer) rotate(index int) error {
 		return err
 	}
 	path := filepath.Join(w.dir, FileName(w.track, index))
-	f, err := wav.NewWriter(path, w.sampleRate, w.channels)
+	prior, resuming := w.priorFor(index)
+
+	var f *wav.Writer
+	var err error
+	if resuming {
+		f, err = wav.OpenWriter(path, w.sampleRate, w.channels, prior.PaddedFrames)
+	} else {
+		f, err = wav.NewWriter(path, w.sampleRate, w.channels)
+	}
 	if err != nil {
 		return err
 	}
 	w.cur, w.curIndex, w.haveCur = f, index, true
 	w.curPackets, w.curPeak, w.framesToSync = 0, 0, 0
 	w.curMin, w.curMax, w.sawData = 0, 0, false
+	w.prior, w.resuming = prior, resuming
 
 	// Announced before any audio is in it, so a recording killed one second
 	// later still has this file named in the manifest rather than orphaned
@@ -226,9 +258,33 @@ func (w *Writer) closeCurrent() error {
 	return err
 }
 
+// priorFor asks what the manifest already holds for an index.
+func (w *Writer) priorFor(index int) (manifest.Segment, bool) {
+	if w.PriorSegment == nil {
+		return manifest.Segment{}, false
+	}
+	return w.PriorSegment(index)
+}
+
 func (w *Writer) emit(complete bool) error {
 	if w.OnSegment == nil {
 		return nil
+	}
+	peak := dbfs(w.curPeak)
+	constant := w.sawData && w.curMin == w.curMax
+	packets := w.curPackets
+	if w.resuming {
+		// The loudest moment in this segment may be on either side of the gap,
+		// and it is the one that decides whether the segment is transcribed.
+		if !w.sawData || w.prior.PeakDBFS > peak {
+			peak = w.prior.PeakDBFS
+		}
+		// Constant means "every sample in this segment is identical". Audio
+		// that varied before the gap makes that false however flat the resumed
+		// audio is; and a segment nothing has been written to yet cannot claim
+		// the earlier run's verdict either way.
+		constant = w.prior.Constant && (!w.sawData || constant)
+		packets += w.prior.Packets
 	}
 	seg := manifest.Segment{
 		Index:           w.curIndex,
@@ -237,9 +293,9 @@ func (w *Writer) emit(complete bool) error {
 		DurationSeconds: w.cur.Duration(),
 		Frames:          w.cur.Frames(),
 		PaddedFrames:    w.cur.PaddedFrames,
-		PeakDBFS:        dbfs(w.curPeak),
-		Constant:        w.sawData && w.curMin == w.curMax,
-		Packets:         w.curPackets,
+		PeakDBFS:        peak,
+		Constant:        constant,
+		Packets:         packets,
 		Complete:        complete,
 	}
 	if complete {

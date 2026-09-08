@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/alexj212/minutes/internal/deliver"
 	"github.com/alexj212/minutes/internal/session"
@@ -60,10 +61,40 @@ type Delivery struct {
 }
 
 // Config is the whole of it.
+// Silence stops a recording that nobody is in any more.
+//
+// Off unless StopAfterSeconds is set, deliberately. Stopping a recording that
+// is still a meeting loses the rest of it until somebody notices a dialog, and
+// a genuine two-minute pause — a break, a demo nobody narrates, somebody
+// reading a document — is an ordinary thing for a meeting to contain. So this
+// is something an operator turns on for their own meetings rather than
+// something every recording inherits.
+type Silence struct {
+	// StopAfterSeconds is how long every track must be quiet before the
+	// recording stops. Zero, the default, never stops.
+	StopAfterSeconds int `json:"stopAfterSeconds,omitempty"`
+	// ThresholdDBFS is the level at or below which audio counts as silence.
+	// Zero uses capture.DefaultSilenceThresholdDBFS.
+	//
+	// Worth setting on a noisy desk: a room whose floor sits above the default
+	// never goes quiet, and auto-stop then does nothing at all. `minutes list`
+	// reports each segment's peak, which is where to read the floor from.
+	ThresholdDBFS float64 `json:"thresholdDBFS,omitempty"`
+}
+
+// StopAfter is the configured window, or zero when auto-stop is off.
+func (s Silence) StopAfter() time.Duration {
+	if s.StopAfterSeconds <= 0 {
+		return 0
+	}
+	return time.Duration(s.StopAfterSeconds) * time.Second
+}
+
 type Config struct {
 	Transcription Transcription     `json:"transcription"`
 	Delivery      Delivery          `json:"delivery"`
 	Retention     session.Retention `json:"retention"`
+	Silence       Silence           `json:"silence"`
 }
 
 // Path is where the config lives.

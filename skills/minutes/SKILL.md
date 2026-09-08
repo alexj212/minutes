@@ -203,6 +203,45 @@ it addressable before it has ever been opened.
 An unreachable agent is different and transient: same fallback, and retrying
 later is reasonable.
 
+## Stopping itself when the room goes quiet
+
+**Off unless somebody turns it on**, and the reason is the direction it fails
+in: stopping a recording that is still a meeting loses the rest of it until a
+human notices a dialog, and a genuine two-minute pause — a break, a demo nobody
+narrates, somebody reading a document — is an ordinary thing for a meeting to
+contain.
+
+```
+minutes config set silence.stopAfterSeconds 120   # 0, the default, never stops
+minutes config set silence.thresholdDBFS -45      # what counts as quiet
+```
+
+**It needs EVERY track quiet, never one.** A quiet microphone while the far end
+talks is somebody listening; a quiet system track while the microphone carries
+speech is an ordinary meeting with nothing being played. Only both together mean
+the room has gone.
+
+**A track that has delivered nothing disarms it rather than counting as quiet**,
+and it says so in the log — otherwise one dead endpoint would stop a meeting the
+other track is recording perfectly well. If auto-stop is configured and never
+seems to fire, that message is why.
+
+On Windows the tray raises a dialog and its menu becomes **Start recording**.
+Clicking it **resumes the same meeting**: same directory, same manifest, one
+transcript, with the gap sitting in the audio as the silence it was. The icon
+goes grey while stopped, because a red dot over a recording that is not running
+is a false disclosure.
+
+**Where there is no indicator — macOS, or Windows with the tray helper
+missing — there is no button to press**, so the recording finishes normally
+rather than waiting for a click nobody can make. Auto-stop still works; resuming
+does not.
+
+**Tell the user the meeting has a hole in it.** A pause is recorded in the
+manifest and stated in the delivery brief, because padded silence and a meeting
+nobody spoke in are identical in the audio. Never write notes that treat a
+stopped stretch as a lull.
+
 ## A transcript is a credential store
 
 **People read passwords, tokens and addresses aloud on calls.** A verbatim
@@ -339,6 +378,8 @@ deleting anything unprompted.
 | `status` says `interrupted` | the supervisor died. Completed segments are intact, the manifest is valid, at most a few seconds of the in-progress segment is lost |
 | `interrupted` while transcribing | audio is complete and safe; only the transcript is missing. `minutes transcribe` produces it |
 | `dropped N microphone line(s) that were echoes` | the meeting was on speakers. Headphones avoid it entirely |
+| `auto-stop is not armed` | a track has delivered no audio at all, so there is nothing to call quiet. Auto-stop will not fire until it does |
+| a recording stopped by itself | `silence.stopAfterSeconds` is set and every track went quiet. Nothing is broken; the tray offers **Start recording** to carry on with the same meeting |
 | `whisper failed on device cuda` | set `device` to `cpu` in the config or fix the GPU. It will not silently fall back |
 | `the shabadoo agent is not reachable` | expected with no agent running. The brief is at `delivery.md`; nothing was lost |
 

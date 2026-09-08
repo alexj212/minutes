@@ -18,6 +18,7 @@ import (
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -533,6 +534,79 @@ func noAudio(m *manifest.Manifest, track string, since time.Duration) {
 // Failure is reported and not fatal. A recording whose indicator did not draw
 // is still a recording, and refusing to record because a tray icon would not
 // appear would be protecting the wrong thing.
+// recordWithResume runs the capture, and when auto-stop fires it holds the
+// recording open for the operator to resume instead of ending it.
+//
+// One recording, one transcript, one set of notes. A resume writes into the
+// same directory with the same epoch, so the gap appears as the silence it was
+// rather than as a second meeting — which is the split-record shape this
+// project has already been bitten by, where two halves of one conversation
+// arrive as two documents and nothing says they belong together.
+//
+// Without somewhere to show a button the loop does not run at all: it stops,
+// and the caller finishes the recording normally. Holding a meeting open for a
+// click nobody can make would be worse than ending it, and on a machine with no
+// indicator there is no click available.
+func recordWithResume(ctx context.Context, base capture.Options, cfg *config.Config,
+	ind *indicator.Indicator, log func(string, ...any)) error {
+
+	after := cfg.Silence.StopAfter()
+	if after <= 0 {
+		return capture.Run(ctx, base)
+	}
+
+	for resume := false; ; resume = true {
+		runCtx, endRun := context.WithCancel(ctx)
+		var quiet atomic.Bool
+
+		opt := base
+		opt.Resume = resume
+		opt.SilenceAfter = after
+		opt.SilenceThresholdDBFS = cfg.Silence.ThresholdDBFS
+		opt.OnSilence = func(since time.Duration) {
+			quiet.Store(true)
+			log("no sound on either track for %s — stopping the recording.", roughly(since.Seconds()))
+			endRun()
+		}
+
+		err := capture.Run(runCtx, opt)
+		endRun()
+		if err != nil || !quiet.Load() {
+			return err
+		}
+
+		// Stopped because the room went quiet. Everything captured so far is on
+		// disk and in the manifest; the question is only whether the meeting is
+		// over.
+		reason := fmt.Sprintf("Nothing was heard for %s, so recording stopped. "+
+			"Click Start recording to carry on with the same meeting.", roughly(after.Seconds()))
+		// Recorded before waiting, not after resuming. A pause that is never
+		// resumed is still a pause, and a recording that ends here should say
+		// it stopped on silence rather than that somebody stopped it.
+		pauseAt := base.Manifest.Duration()
+		idx, err := base.Manifest.AddPause(pauseAt, "no sound on either track")
+		if err != nil {
+			log("recording the pause in the manifest: %v", err)
+		}
+		began := time.Now()
+
+		if err := ind.Pause(reason); err != nil {
+			log("could not tell the tray the recording paused (%v) — finishing instead of waiting", err)
+			return nil
+		}
+		if !ind.WaitForStart(ctx) {
+			return nil
+		}
+		if err := base.Manifest.ClosePause(idx, time.Since(began).Seconds()); err != nil {
+			log("closing the pause in the manifest: %v", err)
+		}
+		if err := ind.Resume(); err != nil {
+			log("could not tell the tray recording resumed: %v", err)
+		}
+		log("resuming into the same recording — the gap stays in it as silence")
+	}
+}
+
 func showIndicator(ctx context.Context, m *manifest.Manifest, helper string,
 	log func(string, ...any), onStop func()) *indicator.Indicator {
 	tray := indicator.FindHelper(helper)
@@ -1047,11 +1121,18 @@ func cmdRecord(args []string) int {
 	ind := showIndicator(recCtx, m, helper, log, endRecording)
 	defer ind.Stop()
 
-	runErr := capture.Run(recCtx, capture.Options{
+	// Loaded before the recording, not after it: auto-stop governs the capture,
+	// and an unreadable config here means no auto-stop rather than no recording.
+	recCfg, recCfgErr := config.Load()
+	if recCfgErr != nil {
+		recCfg = &config.Config{}
+		fmt.Fprintf(os.Stderr, "  config unreadable, recording without auto-stop: %v\n", recCfgErr)
+	}
+	runErr := recordWithResume(recCtx, capture.Options{
 		Helper: helper, Manifest: m, Duration: *dur, AppPID: target.PID,
 		Log:       log,
 		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
-	})
+	}, recCfg, ind, log)
 	if err := m.Finish(runErr); err != nil {
 		fmt.Fprintf(os.Stderr, "writing manifest: %v\n", err)
 	}
@@ -1400,11 +1481,20 @@ func cmdSupervise(args []string) int {
 	ind := showIndicator(recCtx, m, *helper, log, endRecording)
 	defer ind.Stop()
 
-	runErr := capture.Run(recCtx, capture.Options{
+	// Loaded before the recording rather than after it, because auto-stop is a
+	// setting that governs the capture and not the transcript. An unreadable
+	// config is not fatal here: it means no auto-stop, and a recording that
+	// runs until it is stopped is the behaviour everything had before.
+	recCfg, recCfgErr := config.Load()
+	if recCfgErr != nil {
+		recCfg = &config.Config{}
+		fmt.Fprintf(os.Stderr, "config unreadable, recording without auto-stop: %v\n", recCfgErr)
+	}
+	runErr := recordWithResume(recCtx, capture.Options{
 		Helper: *helper, Manifest: m, AppPID: *appPID,
 		Log:       log,
 		OnNoAudio: func(track string, since time.Duration) { noAudio(m, track, since) },
-	})
+	}, recCfg, ind, log)
 	// Capture has ended, whatever happens next. The marker must go now rather
 	// than after transcription, or the machine keeps claiming to be recording
 	// for the length of the transcript.

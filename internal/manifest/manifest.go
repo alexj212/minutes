@@ -235,6 +235,10 @@ type Manifest struct {
 	// EpochQPC100ns is the instant every track calls zero, taken from the
 	// clock both capture streams are stamped with.
 	EpochQPC100ns uint64 `json:"epochQPC100ns"`
+	// Pauses are stretches where the recording stopped itself on silence. The
+	// audio for them is padded silence, indistinguishable from a meeting nobody
+	// spoke in unless this says otherwise.
+	Pauses []Pause `json:"pauses,omitempty"`
 
 	Tracks []Track `json:"tracks"`
 
@@ -392,6 +396,57 @@ func (m *Manifest) SetTrack(name, device string, sampleRate, channels int) error
 	t.SampleRate = sampleRate
 	t.Channels = channels
 	return m.saveLocked()
+}
+
+// Pause is a stretch where the recording stopped itself and was resumed.
+//
+// Recorded because the audio alone cannot say it. The gap is padded silence and
+// looks exactly like a meeting nobody spoke in, so a transcript with a
+// ten-minute hole would otherwise read as ten minutes of people saying nothing
+// — and the session writing the notes has no way to tell those apart.
+type Pause struct {
+	AtSeconds float64 `json:"atSeconds"`
+	// Seconds is how long the recording was stopped. Zero means it was stopped
+	// and never resumed.
+	Seconds float64 `json:"seconds,omitempty"`
+	Reason  string  `json:"reason"`
+}
+
+// AddPause records that the recording stopped itself, and returns its index so
+// the resume can close it.
+func (m *Manifest) AddPause(at float64, reason string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.Pauses = append(m.Pauses, Pause{AtSeconds: at, Reason: reason})
+	return len(m.Pauses) - 1, m.saveLocked()
+}
+
+// ClosePause records how long a pause lasted.
+func (m *Manifest) ClosePause(i int, seconds float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if i < 0 || i >= len(m.Pauses) {
+		return nil
+	}
+	m.Pauses[i].Seconds = seconds
+	return m.saveLocked()
+}
+
+// FindSegment returns a track's segment at an index, and whether there was one.
+//
+// The bool is the point: an absent segment and a zero-valued one are different
+// answers, and a resuming writer that read the second as the first would merge
+// a measured-looking zero peak over a segment holding speech.
+func (m *Manifest) FindSegment(track string, index int) (Segment, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t := m.trackLocked(track)
+	for _, seg := range t.Segments {
+		if seg.Index == index {
+			return seg, true
+		}
+	}
+	return Segment{}, false
 }
 
 // PutSegment inserts or replaces a segment, and saves.

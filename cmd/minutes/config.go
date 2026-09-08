@@ -65,6 +65,31 @@ func intSetting(get func(*config.Config) *int, help string) setting {
 	}
 }
 
+func floatSetting(get func(*config.Config) *float64, help string) setting {
+	return setting{
+		get: func(c *config.Config) string {
+			if v := *get(c); v != 0 {
+				return strconv.FormatFloat(v, 'g', -1, 64)
+			}
+			return "(default)"
+		},
+		set: func(c *config.Config, v string) (string, error) {
+			n, err := strconv.ParseFloat(v, 64)
+			if err != nil {
+				return "", fmt.Errorf("want a number, got %q", v)
+			}
+			// Above zero dBFS is louder than full scale, so nothing would ever
+			// be below it and auto-stop would fire on a meeting in progress.
+			if n >= 0 {
+				return "", fmt.Errorf("want a level below 0 dBFS, e.g. -45, got %q", v)
+			}
+			*get(c) = n
+			return "", nil
+		},
+		help: help,
+	}
+}
+
 func stringSetting(get func(*config.Config) *string, help string) setting {
 	return setting{
 		get:  func(c *config.Config) string { return *get(c) },
@@ -106,6 +131,11 @@ func settings() map[string]setting {
 		"delivery.to":          stringSetting(func(c *config.Config) *string { return &c.Delivery.To }, "default destination for notes"),
 		"delivery.coreSession": stringSetting(func(c *config.Config) *string { return &c.Delivery.CoreSession }, "the only destination that may receive a meeting automatically"),
 		"delivery.auto":        boolSetting(func(c *config.Config) *bool { return &c.Delivery.Auto }, "deliver to the core session once a transcript exists"),
+
+		"silence.stopAfterSeconds": intSetting(func(c *config.Config) *int { return &c.Silence.StopAfterSeconds },
+			"stop the recording after this many seconds with every track quiet; 0 never stops"),
+		"silence.thresholdDBFS": floatSetting(func(c *config.Config) *float64 { return &c.Silence.ThresholdDBFS },
+			"level at or below which audio counts as silence, e.g. -45; 0 uses the default"),
 
 		"retention.keepDays":        intSetting(func(c *config.Config) *int { return &c.Retention.KeepDays }, "remove recordings older than this; 0 means no age limit"),
 		"retention.keepCount":       intSetting(func(c *config.Config) *int { return &c.Retention.KeepCount }, "keep only the newest N; 0 means no count limit"),

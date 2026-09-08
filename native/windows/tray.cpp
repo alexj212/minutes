@@ -36,10 +36,17 @@
 #pragma comment(lib, "gdi32.lib")
 
 static const UINT WM_TRAY = WM_APP + 1;
+// Posted from the stdin thread: the UI is touched only on the thread that owns
+// the window, and the pipe is read on another.
+static const UINT WM_PAUSED = WM_APP + 2;
+static const UINT WM_RESUMED = WM_APP + 3;
 static const UINT ID_STOP = 1001;
 static const UINT ID_FOLDER = 1002;
 static const UINT ID_ELAPSED = 1003;
+static const UINT ID_START = 1004;
 static const UINT TIMER_TICK = 1;
+
+static std::wstring widen(const char *s);
 
 static NOTIFYICONDATAW g_nid = {};
 static HWND g_hwnd = nullptr;
@@ -47,6 +54,11 @@ static std::wstring g_name;
 static std::wstring g_dir;
 static ULONGLONG g_startedMs = 0;
 static bool g_stopping = false;
+// g_paused is the recording having stopped itself on silence, with the operator
+// able to carry on. The icon must change with it: a red dot means "this machine
+// is recording you", and leaving one on screen over a stopped recording is a
+// false disclosure, which is the one thing this indicator exists to prevent.
+static bool g_paused = false;
 
 // say writes one line to stdout and flushes.
 //
@@ -60,6 +72,10 @@ static void say(const char *line) {
 }
 
 static std::wstring elapsedText() {
+    // A paused recording must not keep counting up. The number beside a red dot
+    // is read as "how much of me has been recorded", and running it on through
+    // a stop would overstate that every second it was left alone.
+    if (g_paused) return L"stopped — nothing was heard";
     ULONGLONG secs = (GetTickCount64() - g_startedMs) / 1000;
     wchar_t buf[64];
     if (secs < 3600) {
@@ -82,10 +98,14 @@ static void updateTooltip() {
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 
-// makeIcon draws a red dot, which is what a recording indicator looks like
+// makeIcon draws a filled dot, which is what a recording indicator looks like
 // everywhere else. Drawn rather than shipped as a resource so the helper stays
 // one self-contained .exe with no files beside it to lose.
-static HICON makeIcon() {
+//
+// The colour is a parameter because it carries meaning rather than style: red
+// while recording, grey while paused. A viewer glancing at the tray is being
+// told whether they are being recorded, and the two states must not look alike.
+static HICON makeIcon(COLORREF fill) {
     int n = GetSystemMetrics(SM_CXSMICON);
     if (n <= 0) n = 16;
     HDC screen = GetDC(nullptr);
@@ -99,13 +119,13 @@ static HICON makeIcon() {
     FillRect(dc, &all, black);
     DeleteObject(black);
 
-    HBRUSH red = CreateSolidBrush(RGB(220, 40, 40));
-    HGDIOBJ oldBrush = SelectObject(dc, red);
+    HBRUSH dot = CreateSolidBrush(fill);
+    HGDIOBJ oldBrush = SelectObject(dc, dot);
     HGDIOBJ oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
     Ellipse(dc, 1, 1, n - 1, n - 1);
     SelectObject(dc, oldPen);
     SelectObject(dc, oldBrush);
-    DeleteObject(red);
+    DeleteObject(dot);
 
     // The mask is the inverse: opaque where the dot is drawn.
     SelectObject(dc, mask);
@@ -143,12 +163,16 @@ static void showMenu() {
     AppendMenuW(menu, MF_STRING | MF_DISABLED | MF_GRAYED, 0, header.c_str());
     AppendMenuW(menu, MF_STRING | MF_DISABLED | MF_GRAYED, ID_ELAPSED, elapsedText().c_str());
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, ID_STOP,
-                g_stopping ? L"Stopping…" : L"Stop recording");
+    if (g_paused) {
+        AppendMenuW(menu, MF_STRING, ID_START, L"Start recording");
+    } else {
+        AppendMenuW(menu, MF_STRING, ID_STOP,
+                    g_stopping ? L"Stopping…" : L"Stop recording");
+    }
     if (!g_dir.empty()) {
         AppendMenuW(menu, MF_STRING, ID_FOLDER, L"Open folder");
     }
-    if (g_stopping) {
+    if (g_stopping && !g_paused) {
         EnableMenuItem(menu, ID_STOP, MF_BYCOMMAND | MF_GRAYED);
     }
 
@@ -163,6 +187,54 @@ static void showMenu() {
     DestroyMenu(menu);
 }
 
+// setPaused swaps the icon and the tooltip for the paused state, on the UI
+// thread. The dialog is deliberately not raised from here: a modal box runs its
+// own message loop, and putting one on this thread would freeze the tray menu
+// for as long as it is on screen.
+// dialogArgs is owned by the thread it is handed to, which frees it.
+struct dialogArgs {
+    std::wstring text;
+    std::wstring title;
+};
+
+static DWORD WINAPI dialogThread(LPVOID p) {
+    dialogArgs *a = static_cast<dialogArgs *>(p);
+    MessageBoxW(nullptr, a->text.c_str(), a->title.c_str(),
+                MB_OK | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST);
+    delete a;
+    return 0;
+}
+
+// showDialog raises a box that outlives neither the message loop nor the pipe
+// reader, because it runs on neither.
+static void showDialog(const std::wstring &text, const std::wstring &title) {
+    dialogArgs *a = new dialogArgs{text, title};
+    HANDLE h = CreateThread(nullptr, 0, dialogThread, a, 0, nullptr);
+    if (h) {
+        CloseHandle(h);
+    } else {
+        delete a;
+    }
+}
+
+static void setPaused(bool paused) {
+    g_paused = paused;
+    g_stopping = false;
+    HICON old = g_nid.hIcon;
+    g_nid.hIcon = makeIcon(paused ? RGB(130, 130, 130) : RGB(220, 40, 40));
+    updateTooltip();
+    Shell_NotifyIconW(NIM_MODIFY, &g_nid);
+    if (old) DestroyIcon(old);
+}
+
+static void askToStart() {
+    if (!g_paused) return;
+    say("START");
+    // Left paused until the orchestrator says RECORDING. It is not recording
+    // because the button was pressed; it is recording once capture has started,
+    // and the icon should not claim otherwise in between.
+}
+
 static void askToStop() {
     if (g_stopping) return;
     g_stopping = true;
@@ -175,6 +247,16 @@ static void askToStop() {
 
 static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
+    case WM_PAUSED:
+        setPaused(true);
+        return 0;
+    case WM_RESUMED:
+        // g_startedMs is deliberately left alone. It is one meeting, and the
+        // recording's timeline really does span the gap — the manifest places
+        // the resumed audio at its true offset and fills the hole with silence,
+        // so an elapsed time that restarted would disagree with the file.
+        setPaused(false);
+        return 0;
     case WM_TRAY:
         if (LOWORD(lp) == WM_RBUTTONUP || LOWORD(lp) == WM_LBUTTONUP ||
             LOWORD(lp) == WM_CONTEXTMENU) {
@@ -183,6 +265,9 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_COMMAND:
         switch (LOWORD(wp)) {
+        case ID_START:
+            askToStart();
+            return 0;
         case ID_STOP:
             askToStop();
             return 0;
@@ -203,17 +288,45 @@ static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-// watchStdin posts a quit when the orchestrator closes the pipe.
+// watchStdin carries the orchestrator's messages, and posts a quit when it
+// closes the pipe.
 //
 // The message loop cannot poll for this, so it is read on its own thread. EOF
-// is the only shutdown signal this program has: nothing else is allowed to
-// reach it, and the pipe closes on its own if the orchestrator dies, so it can
-// never be left running with no recording behind it.
+// is still the only shutdown signal: the pipe closes on its own if the
+// orchestrator dies, so this can never be left running with no recording
+// behind it.
+//
+// Two lines are understood. PAUSED means the recording stopped itself because
+// nothing was heard, and the rest of the line is why, shown to the operator.
+// RECORDING means it has started again. Anything else is read and discarded
+// rather than ignored in the pipe, so a message this build does not know about
+// cannot wedge the orchestrator writing into a full one.
 static DWORD WINAPI watchStdin(LPVOID) {
-    char buf[64];
+    char buf[512];
     while (fgets(buf, sizeof buf, stdin) != nullptr) {
-        // Nothing is sent this way today. Reading and discarding means a future
-        // message does not wedge the orchestrator writing into a full pipe.
+        std::string line(buf);
+        while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) line.pop_back();
+
+        if (line.rfind("PAUSED", 0) == 0) {
+            std::string why = line.size() > 7 ? line.substr(7) : std::string();
+            PostMessageW(g_hwnd, WM_PAUSED, 0, 0);
+            // On its own thread, and neither of the two obvious places would
+            // do. On the UI thread a message box freezes the tray menu for as
+            // long as it is up, leaving the operator a dialog telling them
+            // recording stopped and no way to restart it. On THIS thread it
+            // blocks the read, so the pipe closing at the end of the recording
+            // is not noticed until somebody dismisses the box — and the icon
+            // sits there over a finished recording, claiming the machine is
+            // still listening. Measured: the tray outlived EOF by the life of
+            // the dialog.
+            std::wstring text = widen(why.c_str());
+            if (text.empty()) text = L"Recording stopped because nothing was heard.";
+            text += L"\n\nRight-click the tray icon and choose Start recording "
+                    L"to carry on with the same meeting.";
+            showDialog(text, g_name.empty() ? L"minutes" : (L"minutes — " + g_name));
+        } else if (line.rfind("RECORDING", 0) == 0) {
+            PostMessageW(g_hwnd, WM_RESUMED, 0, 0);
+        }
     }
     PostMessageW(g_hwnd, WM_CLOSE, 0, 0);
     return 0;
@@ -262,7 +375,7 @@ int main(int argc, char **argv) {
     g_nid.uID = 1;
     g_nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     g_nid.uCallbackMessage = WM_TRAY;
-    g_nid.hIcon = makeIcon();
+    g_nid.hIcon = makeIcon(RGB(220, 40, 40));
     wcsncpy_s(g_nid.szTip, L"minutes", _TRUNCATE);
     if (!Shell_NotifyIconW(NIM_ADD, &g_nid)) {
         // Reported rather than swallowed: the orchestrator says the indicator

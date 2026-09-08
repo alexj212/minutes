@@ -61,6 +61,69 @@ been run, because a meeting is still recording and replacing the binary near a
 live capture is not a risk worth taking to fix a listing label. It installs when
 the meeting ends.
 
+### ~~Resuming a recording would have destroyed the segment it resumed into~~ — fixed before it shipped
+
+Auto-stop resumes into the same recording, and segment index is derived from the
+absolute frame offset — `offset / framesPerSegment`. So a two-minute gap
+beginning thirty seconds into a five-minute segment resumes at 150s, which is
+**the same segment**. `rotate()` called `wav.NewWriter`, which is `os.Create`,
+which truncates; and `PutSegment` replaces a manifest entry by index, so the
+entry would have been rewritten over the top. Everything recorded before the gap
+would have gone, with nothing reporting it.
+
+Found by reading the write path before designing against it rather than after,
+which is the only reason it never shipped. `OpenWriter` appends instead, and a
+test fails on the truncating version.
+
+Three things had to come with it, and each was a second way to lose something:
+
+- **The counters are carried forward, not restarted.** A reopened segment
+  reporting only the new run's peak would report the quiet half of a segment
+  whose speech is on the other side of the gap — and peak is what decides
+  whether a segment is transcribed at all. It would have been skipped.
+- **A format change refuses the resume.** If the default endpoint moved during
+  the gap the resumed audio arrives at a different rate, and appending 44100
+  into a file declared 48000 is the "plays fine, 8% fast, every timestamp
+  slides" corruption already documented for macOS, arriving on Windows by
+  another route.
+- **The epoch is kept.** Taking a new one from the first packet after the gap
+  would place the resumed audio at zero — over the beginning of the meeting
+  rather than after it.
+
+### ~~The stop dialog blocked the tray from noticing the recording had ended~~ — fixed, and only a live run found it
+
+The tray raises a message box when a recording stops itself. Raised from the
+thread that reads the orchestrator's pipe, it blocked that read for as long as
+the box was on screen — so the pipe closing at the end of the recording was not
+noticed until somebody dismissed it, and **a red dot sat in the tray over a
+finished recording**, which is the false disclosure the indicator exists to
+prevent.
+
+Neither obvious thread would do. On the UI thread a modal box runs its own
+message loop and freezes the tray menu, leaving the operator a dialog saying
+recording stopped and no way to restart it. It gets its own short-lived thread.
+
+Measured both ways rather than reasoned about: before, the tray outlived EOF
+until a 20-second timeout killed it; after, it exits 0 within a few seconds of
+the pipe closing with the dialog still up. **A compile is not a test of a
+lifecycle**, and this one only appeared when the thing was actually run.
+
+### Auto-stop cannot fire on a track that never delivers, and says so
+
+Not a defect — a stated limit, recorded because a check that silently never
+fires is this project's most expensive recurring shape.
+
+Auto-stop needs every track quiet, and a track that has delivered no audio at
+all has established nothing about whether the room is quiet. Counting it as
+quiet would let one dead endpoint stop a meeting the other track is recording
+perfectly well, so it disarms the check instead and logs *"auto-stop is not
+armed"*.
+
+The consequence is real: on a machine where the far end never opens the render
+endpoint — an in-person meeting captured on the microphone alone — auto-stop
+never fires. That is the safe direction and it is visible rather than silent,
+which is the whole difference between this and the five defects above it.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing

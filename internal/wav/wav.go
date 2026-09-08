@@ -11,10 +11,12 @@ package wav
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 )
 
 const headerSize = 44
@@ -52,6 +54,69 @@ func NewWriter(path string, sampleRate, channels int) (*Writer, error) {
 		return nil, err
 	}
 	return &Writer{f: f, path: path, sampleRate: sampleRate, channels: channels}, nil
+}
+
+// ErrFormatChanged is returned when an existing file cannot be appended to
+// because it was written at a different rate or channel count.
+var ErrFormatChanged = errors.New("the existing file was written in a different format")
+
+// OpenWriter reopens an existing file to append to it, rather than replacing it.
+//
+// This exists for resuming a recording after an auto-stop. Segment index is
+// derived from the absolute frame offset, so a resume after a two-minute gap
+// usually lands back in the SAME five-minute segment — and NewWriter's
+// os.Create would truncate it, destroying the audio recorded before the gap
+// while the manifest entry was replaced over the top and hid the loss.
+//
+// priorPadded carries forward what the earlier run already gap-filled, so the
+// number the manifest reports stays cumulative rather than restarting.
+//
+// It refuses on a format change rather than appending. If the default endpoint
+// moved during the gap the resumed audio arrives at a different rate, and
+// appending 44100 into a file declared 48000 is the "plays fine, 8% fast, every
+// timestamp slides" corruption this project has already paid for once.
+func OpenWriter(path string, sampleRate, channels int, priorPadded uint64) (*Writer, error) {
+	if sampleRate <= 0 || channels <= 0 {
+		return nil, fmt.Errorf("invalid wav parameters: rate=%d channels=%d", sampleRate, channels)
+	}
+	f, err := os.OpenFile(path, os.O_RDWR, 0o644)
+	if err != nil {
+		return nil, err
+	}
+	var hdr [headerSize]byte
+	if _, err := io.ReadFull(f, hdr[:]); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("reading the existing header: %w", err)
+	}
+	haveChannels := int(binary.LittleEndian.Uint16(hdr[22:]))
+	haveRate := int(binary.LittleEndian.Uint32(hdr[24:]))
+	if haveRate != sampleRate || haveChannels != channels {
+		f.Close()
+		return nil, fmt.Errorf("%w: %s holds %d Hz %d ch, the stream is now %d Hz %d ch",
+			ErrFormatChanged, filepath.Base(path), haveRate, haveChannels, sampleRate, channels)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	size := info.Size()
+	if size < headerSize {
+		f.Close()
+		return nil, fmt.Errorf("%s is shorter than a wav header", filepath.Base(path))
+	}
+	frameBytes := int64(channels) * 2
+	frames := uint64((size - headerSize) / frameBytes)
+	// Seek past whole frames only. A file cut mid-frame by a crash would
+	// otherwise put every later sample in the wrong channel.
+	if _, err := f.Seek(headerSize+int64(frames)*frameBytes, io.SeekStart); err != nil {
+		f.Close()
+		return nil, err
+	}
+	return &Writer{
+		f: f, path: path, sampleRate: sampleRate, channels: channels,
+		framesWritten: frames, PaddedFrames: priorPadded,
+	}, nil
 }
 
 func (w *Writer) Path() string   { return w.path }

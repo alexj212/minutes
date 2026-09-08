@@ -316,3 +316,170 @@ func TestATrackDeliveringNothingIsReportedWhileRecording(t *testing.T) {
 		t.Errorf("reported after %s, before the threshold had elapsed", d)
 	}
 }
+
+// streamingHelper emits the track info once and then a packet pair every
+// `delay` seconds, `times` over.
+//
+// The difference from liveHelper matters and it is what the first version of
+// this test got wrong: `cat` delivers every packet at once and then the stream
+// sits idle, so tracks carrying loud audio look quiet a moment later and
+// auto-stop fires on a meeting in full flow. A live capture keeps delivering,
+// and "quiet" only means anything against a stream that is still arriving.
+func streamingHelper(t *testing.T, info, packet []byte, times int, delay string) string {
+	t.Helper()
+	dir := t.TempDir()
+	infoPath := filepath.Join(dir, "info.bin")
+	pktPath := filepath.Join(dir, "packet.bin")
+	if err := os.WriteFile(infoPath, info, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(pktPath, packet, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(dir, "streaming-helper")
+	body := fmt.Sprintf("#!/bin/sh\ncat %q\ni=0\nwhile [ $i -lt %d ]; do cat %q; sleep %s; i=$((i+1)); done\n",
+		infoPath, times, pktPath, delay)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
+// pcm16At fills n samples at one amplitude, so a packet can be made
+// deliberately loud or deliberately quiet.
+func pcm16At(n int, amp int16) []byte {
+	b := make([]byte, n*2)
+	for i := 0; i < n; i++ {
+		v := amp
+		if i%2 == 1 {
+			v = -amp
+		}
+		binary.LittleEndian.PutUint16(b[i*2:], uint16(v))
+	}
+	return b
+}
+
+// Auto-stop needs EVERY track quiet, and this asserts the distinction rather
+// than one side of it.
+//
+// A quiet microphone while the far end talks is somebody listening. A quiet
+// system track while the microphone carries speech is an ordinary meeting with
+// nothing being played. Only both together mean the room has gone — and a check
+// that fired on either alone would stop a meeting that was still happening,
+// which is the expensive direction here.
+func TestAutoStopNeedsBothTracksQuiet(t *testing.T) {
+	const loud, hush = 12000, 20 // ~-8 dBFS and ~-64 dBFS
+
+	run := func(t *testing.T, micAmp, sysAmp int16) bool {
+		t.Helper()
+		info := buildFrame(frame.TypeTrackInfo, frame.TrackMic, 0, 0, 0,
+			trackInfoPayload(48000, 1, 16, 1, 2, "Mic"))
+		info = append(info, buildFrame(frame.TypeTrackInfo, frame.TrackSystem, 0, 0, 0,
+			trackInfoPayload(48000, 1, 16, 1, 2, "Speakers"))...)
+		packet := buildFrame(frame.TypeAudio, frame.TrackMic, 1_000_000, 0, 0, pcm16At(240, micAmp))
+		packet = append(packet, buildFrame(frame.TypeAudio, frame.TrackSystem, 1_000_000, 0, 0, pcm16At(240, sysAmp))...)
+
+		var mu sync.Mutex
+		fired := false
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := Run(ctx, Options{
+			Helper:               streamingHelper(t, info, packet, 20, "0.05"),
+			Manifest:             newManifest(t),
+			SilenceAfter:         150 * time.Millisecond,
+			SilenceThresholdDBFS: -45,
+			OnSilence: func(time.Duration) {
+				mu.Lock()
+				defer mu.Unlock()
+				fired = true
+			},
+		})
+		if err != nil {
+			t.Fatalf("capture failed: %v", err)
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return fired
+	}
+
+	for _, tc := range []struct {
+		name           string
+		mic, sys       int16
+		wantAutoStop   bool
+		whyNotStopping string
+	}{
+		{"both quiet", hush, hush, true, ""},
+		{"microphone talking", loud, hush, false, "somebody is speaking into it"},
+		{"far end talking", hush, loud, false, "the operator is listening to the far end"},
+		{"both talking", loud, loud, false, "the meeting is in full flow"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := run(t, tc.mic, tc.sys)
+			if got != tc.wantAutoStop {
+				if tc.wantAutoStop {
+					t.Errorf("auto-stop did not fire with both tracks silent — the feature does nothing")
+				} else {
+					t.Errorf("auto-stop fired while %s: it would have cut a live meeting", tc.whyNotStopping)
+				}
+			}
+		})
+	}
+}
+
+// A track that has delivered nothing has established nothing, so it must not be
+// counted as quiet — one dead endpoint would otherwise stop a meeting the other
+// track is still recording perfectly well.
+func TestAutoStopDoesNotFireWhileATrackHasDeliveredNothing(t *testing.T) {
+	var out []byte
+	out = append(out, buildFrame(frame.TypeTrackInfo, frame.TrackMic, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Mic"))...)
+	out = append(out, buildFrame(frame.TypeTrackInfo, frame.TrackSystem, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Speakers"))...)
+	// The system endpoint never opens. Only the microphone delivers, quietly.
+	for i := 0; i < 4; i++ {
+		out = append(out, buildFrame(frame.TypeAudio, frame.TrackMic,
+			uint64(i+1)*1_000_000, 0, 0, pcm16At(240, 20))...)
+	}
+
+	var mu sync.Mutex
+	fired := false
+	var logged []string
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := Run(ctx, Options{
+		Helper:       liveHelper(t, out, "1"),
+		Manifest:     newManifest(t),
+		SilenceAfter: 150 * time.Millisecond,
+		Log: func(f string, a ...any) {
+			mu.Lock()
+			defer mu.Unlock()
+			logged = append(logged, fmt.Sprintf(f, a...))
+		},
+		OnSilence: func(time.Duration) {
+			mu.Lock()
+			defer mu.Unlock()
+			fired = true
+		},
+	})
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if fired {
+		t.Error("auto-stop fired while a track had delivered nothing at all — " +
+			"a dead endpoint would stop a meeting the other track is still recording")
+	}
+	// And it must SAY it is not armed. An auto-stop that silently never fires
+	// is indistinguishable from one that is working and simply has not yet.
+	var said bool
+	for _, l := range logged {
+		if strings.Contains(l, "auto-stop is not armed") {
+			said = true
+		}
+	}
+	if !said {
+		t.Errorf("nothing said auto-stop was disarmed:\n%s", strings.Join(logged, "\n"))
+	}
+}

@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
@@ -48,7 +49,62 @@ type Options struct {
 	// NoAudioAfter is how long a declared track may deliver nothing before
 	// OnNoAudio fires. Zero uses DefaultNoAudioAfter.
 	NoAudioAfter time.Duration
+
+	// OnSilence is called once when every track that is delivering audio has
+	// been below SilenceThresholdDBFS for SilenceAfter — nobody speaking and
+	// nothing playing.
+	//
+	// EVERY track, because either one alone means the opposite of what it looks
+	// like. A quiet microphone while the far end talks is somebody listening; a
+	// quiet system track while the microphone carries speech is an ordinary
+	// meeting with nothing being played. Only both together mean the room has
+	// gone.
+	//
+	// Fires once per Run. The caller stops the recording; nothing here does.
+	OnSilence func(since time.Duration)
+	// SilenceAfter arms OnSilence. Zero disables it, and that is the default:
+	// stopping a recording that is still a meeting loses the rest of it, so
+	// this is opt-in rather than something every recording inherits.
+	SilenceAfter time.Duration
+	// SilenceThresholdDBFS is the level at or below which a packet counts as
+	// silence. Zero uses DefaultSilenceThresholdDBFS.
+	SilenceThresholdDBFS float64
+
+	// Resume continues a recording that was stopped, rather than starting one.
+	//
+	// The manifest's epoch is kept, so the resumed audio is placed at its true
+	// offset and the gap appears as the silence it was, and segments already on
+	// disk are reopened rather than replaced.
+	Resume bool
 }
+
+// peakAmplitude is the loudest sample in a packet, rectified.
+func peakAmplitude(samples []int16) int16 {
+	var pk int16
+	for _, v := range samples {
+		if v == math.MinInt16 {
+			return math.MaxInt16
+		}
+		if v < 0 {
+			v = -v
+		}
+		if v > pk {
+			pk = v
+		}
+	}
+	return pk
+}
+
+// DefaultSilenceThresholdDBFS is the level below which audio counts as silence
+// for auto-stop.
+//
+// Above the floors already used downstream — -60 dBFS skips transcription
+// entirely, and a track peaking below -40 dBFS is reported as carrying no
+// speech — because this decides whether to stop a meeting rather than whether
+// to transcribe a segment, and the two failures cost differently. A room that
+// measured -55.7 dBFS with nothing happening in it is the case this must not
+// treat as speech.
+const DefaultSilenceThresholdDBFS = -45
 
 // DefaultNoAudioAfter is how long a track may deliver nothing before it is
 // reported.
@@ -134,6 +190,11 @@ func Run(ctx context.Context, opt Options) error {
 		// was asking.
 		audio    uint64
 		reported bool
+		// lastLoud is when this track last delivered a packet above the
+		// silence threshold. Zero means never, which is not the same as "long
+		// ago": a track that has delivered nothing has established nothing
+		// about whether the room is quiet.
+		lastLoud time.Time
 	}
 	tracks := map[frame.Track]*trackState{}
 	// Guards tracks against the watcher below. The reader owns every write;
@@ -141,6 +202,12 @@ func Run(ctx context.Context, opt Options) error {
 	var mu sync.Mutex
 	var epoch uint64
 	var epochSet bool
+	// A resumed recording keeps the epoch it already had. Taking a new one from
+	// the first packet after the gap would place the resumed audio at zero, so
+	// it would overwrite the beginning of the meeting instead of following it.
+	if opt.Resume && m.EpochQPC100ns != 0 {
+		epoch, epochSet = m.EpochQPC100ns, true
+	}
 	var runErr error
 	// The helper reports why it died in a LOG frame. Keeping the last one per
 	// track means a failed recording's manifest can say "the audio device was
@@ -195,6 +262,80 @@ func Run(ctx context.Context, opt Options) error {
 		}()
 	}
 
+	// Silence is compared as an amplitude rather than in dBFS, so the check on
+	// the hot path is an integer compare instead of a logarithm per packet.
+	silenceArmed := opt.OnSilence != nil && opt.SilenceAfter > 0
+	silenceAmp := int16(0)
+	if silenceArmed {
+		th := opt.SilenceThresholdDBFS
+		if th == 0 {
+			th = DefaultSilenceThresholdDBFS
+		}
+		if a := math.Round(math.MaxInt16 * math.Pow(10, th/20)); a >= 1 && a < math.MaxInt16 {
+			silenceAmp = int16(a)
+		}
+		opt.Log("auto-stop armed: stopping after %s with every track at or below %.0f dBFS",
+			opt.SilenceAfter, th)
+
+		go func() {
+			tick := opt.SilenceAfter / 10
+			if tick < 10*time.Millisecond {
+				tick = 10 * time.Millisecond
+			}
+			t := time.NewTicker(tick)
+			defer t.Stop()
+			saidUnarmed := false
+			for {
+				select {
+				case <-stopped:
+					return
+				case <-t.C:
+				}
+				now := time.Now()
+
+				mu.Lock()
+				// A track that has delivered nothing has established nothing.
+				// Treating it as quiet would let one dead endpoint stop a
+				// meeting the other track is still recording, so it disarms the
+				// check instead — and says so, because an auto-stop that
+				// silently never fires is the failure this project keeps
+				// finding.
+				var unknown []string
+				quiet, armed := 0, 0
+				oldest := now
+				for id, ts := range tracks {
+					if ts.audio == 0 {
+						unknown = append(unknown, id.String())
+						continue
+					}
+					armed++
+					if now.Sub(ts.lastLoud) >= opt.SilenceAfter {
+						quiet++
+					}
+					if ts.lastLoud.Before(oldest) {
+						oldest = ts.lastLoud
+					}
+				}
+				fire := armed > 0 && len(unknown) == 0 && quiet == armed
+				mu.Unlock()
+
+				if len(unknown) > 0 {
+					if !saidUnarmed {
+						saidUnarmed = true
+						opt.Log("auto-stop is not armed: %s has delivered no audio at all, "+
+							"so there is nothing to call quiet. The recording will run until "+
+							"it is stopped.", strings.Join(unknown, " and "))
+					}
+					continue
+				}
+				if fire {
+					opt.OnSilence(now.Sub(oldest))
+					return
+				}
+			}
+		}()
+	}
+
 	reader := frame.NewReader(bufio.NewReaderSize(stdout, 1<<20))
 
 loop:
@@ -224,6 +365,14 @@ loop:
 			}
 			sw.OnSegment = func(seg manifest.Segment) error {
 				return m.PutSegment(name, seg)
+			}
+			if opt.Resume {
+				// Only when resuming. On a fresh recording a segment file that
+				// somehow already exists is debris, and appending this
+				// recording's audio to it would be worse than replacing it.
+				sw.PriorSegment = func(index int) (manifest.Segment, bool) {
+					return m.FindSegment(name, index)
+				}
 			}
 			if err := m.SetTrack(name, info.Device, int(info.SampleRate), int(info.Channels)); err != nil {
 				runErr = err
@@ -264,6 +413,14 @@ loop:
 			}
 			mu.Lock()
 			ts.audio++
+			if silenceArmed {
+				// Set on the first packet whatever its level, so "quiet since"
+				// is measured from when the track started delivering rather
+				// than from the zero time, which would fire instantly.
+				if ts.lastLoud.IsZero() || peakAmplitude(samples) > silenceAmp {
+					ts.lastLoud = time.Now()
+				}
+			}
 			mu.Unlock()
 			offset := ts.place.Place(f.QPC100ns, f.DevicePos)
 			if err := ts.writer.WriteAt(offset, samples, f.Flags); err != nil {
