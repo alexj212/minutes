@@ -310,10 +310,21 @@ two-hour transcript end to end is what backs it.
 The brief states the ask: **decisions**, **action items with owners**, **open
 questions**. Beyond that:
 
-0. **Check the project for notes before writing any.** A brief arriving is not
-   evidence that notes are missing — it is only evidence that this tool asked.
-   A 1:1 was written up in full before somebody noticed notes for it had existed
-   since the day of the meeting. Look first; the answer may be "already filed".
+0. **Check the project for notes before writing any, and check by opening the
+   file.** A brief arriving is not evidence that notes are missing — it is only
+   evidence that this tool asked. A 1:1 was written up in full before somebody
+   noticed notes for it had existed since the day of the meeting.
+
+   **But a matching date is not a matching meeting, and that is the more
+   expensive mistake.** One day held two calls with the same person: a
+   97-minute one at 10:54 and a 46-minute one at 13:06, on unrelated subjects.
+   A note existed for the second, so the first read as already done — and its
+   transcript was about to be deleted, which would have lost the meeting
+   outright. What separated them was opening the file and finding a different
+   length, a different time and a different attendee.
+
+   So the two answers are "already filed, and I confirmed it is this meeting"
+   and "not filed". *Probably filed* is neither.
 1. **Read the flagged stretches before quoting anything.** A brief may carry
    stretches marked *the other side was silent* — the far end said nothing for
    over two minutes. What the microphone picked up there may be the room rather

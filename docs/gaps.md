@@ -231,6 +231,39 @@ late-by-13.8 s tap seen at 00:25 was real mode behaviour rather than an artifact
 of the probe window — so the auto-stop retraction being pinned only by a
 synthetic two-phase test stands on its own, and is not waiting on this.
 
+### A rule caught what judgement did not, in the direction nobody wrote it for
+
+Step 0 of the notes procedure — *check the project for notes before writing any*
+— was added because a session wrote up a 1:1 in full before noticing notes had
+existed since the day of the meeting. It was written to prevent redundant work.
+
+What it actually caught was the opposite failure, which is worse.
+
+Two calls with the same person on one day: 97 minutes at 10:54 about a Jenkins
+deployment failure that cancelled a customer demo, and 46 minutes at 13:06 about
+Keycloak. A note existed for the second. The first therefore read as *already
+done* — and its transcript was hours from being deleted as handed over, which
+would have lost a 97-minute meeting outright with nothing left to recover it
+from.
+
+**I offered that shortcut myself**, in the handover brief: *"you may already have
+written notes from this one — if so, say so and I will skip it."*
+
+What separated them was opening the file: different length, different time, an
+attendee who appears in one and not the other. `devops` corrected my record of
+this, and the correction is the finding — I had credited them with declining the
+shortcut, and their answer was that they nearly took it and the rule stopped
+them, not their judgement.
+
+That is the strongest thing that can be said for writing a rule down. A rule that
+only works when somebody is already being careful adds nothing; this one fired
+while its reader was reaching for the wrong answer.
+
+The step now says both directions and says what *look* means, because "look
+first" is satisfied by reading a filename. The two acceptable answers are
+"already filed, and I confirmed it is this meeting" and "not filed" — *probably
+filed* is neither.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
