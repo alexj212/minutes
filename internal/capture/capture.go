@@ -322,11 +322,23 @@ func Run(ctx context.Context, opt Options) error {
 				if len(unknown) > 0 {
 					if !saidUnarmed {
 						saidUnarmed = true
-						opt.Log("auto-stop is not armed: %s has delivered no audio at all, "+
-							"so there is nothing to call quiet. The recording will run until "+
-							"it is stopped.", strings.Join(unknown, " and "))
+						// Says what is true now, and no more. The first version
+						// ended "the recording will run until it is stopped",
+						// which is a promise about the future that this loop
+						// cannot keep: a track that starts late re-arms the
+						// check, and minutes-mac watched one recording print
+						// that line and then auto-stop anyway. The behaviour was
+						// right and the sentence was not.
+						opt.Log("auto-stop cannot fire yet: %s has delivered no audio at all, "+
+							"so there is nothing to call quiet.", strings.Join(unknown, " and "))
 					}
 					continue
+				}
+				if saidUnarmed {
+					// Retracted where it was said. Leaving the disarm notice as
+					// the last word on the subject is what made it misleading.
+					saidUnarmed = false
+					opt.Log("auto-stop is armed now: every track is delivering audio.")
 				}
 				if fire {
 					opt.OnSilence(now.Sub(oldest))

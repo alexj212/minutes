@@ -214,7 +214,13 @@ contain.
 ```
 minutes config set silence.stopAfterSeconds 120   # 0, the default, never stops
 minutes config set silence.thresholdDBFS -45      # what counts as quiet
+minutes config unset silence.thresholdDBFS        # back to unset, not to -45
 ```
+
+**`unset` is not `set` to the default value**, and the display draws the
+difference — `(default)` rather than a number. Use it to undo a probe: a
+threshold left loose is a recording that stops while somebody is still talking,
+and on a machine with no indicator there is no button to carry on.
 
 **It needs EVERY track quiet, never one.** A quiet microphone while the far end
 talks is somebody listening; a quiet system track while the microphone carries
@@ -223,8 +229,22 @@ the room has gone.
 
 **A track that has delivered nothing disarms it rather than counting as quiet**,
 and it says so in the log — otherwise one dead endpoint would stop a meeting the
-other track is recording perfectly well. If auto-stop is configured and never
-seems to fire, that message is why.
+other track is recording perfectly well. It re-arms and says so if that track
+starts late. If auto-stop is configured and never seems to fire, that message is
+why.
+
+**To test it, play something for a few seconds first, then go quiet.** A render
+endpoint that nothing has opened delivers no packets at all, so "say nothing,
+play nothing" disarms the check by design and the recording runs to full
+duration — which reads as the feature being broken. Waking the tap is what arms
+it; the silence after is what it measures. True on any freshly booted machine,
+not just one whose tap is misbehaving.
+
+**Check the threshold against the room before trusting it.** A microphone floor
+above `thresholdDBFS` means a silent room never counts as quiet and auto-stop
+can never fire. One Mac measured -27.9 dBFS with nobody in the room, well above
+the -45 default. `minutes list` reports per-segment peaks, which is where to
+read your own floor from.
 
 On Windows the tray raises a dialog and its menu becomes **Start recording**.
 Clicking it **resumes the same meeting**: same directory, same manifest, one

@@ -392,8 +392,24 @@ meeting with nothing playing. And a track that has delivered *nothing* disarms
 the check rather than counting as quiet, because one dead endpoint would
 otherwise stop a meeting the other track is recording fine. That case says so:
 
-    auto-stop is not armed: system has delivered no audio at all, so there is
-    nothing to call quiet. The recording will run until it is stopped.
+    auto-stop cannot fire yet: system has delivered no audio at all, so there
+    is nothing to call quiet.
+
+It retracts that if the track turns up later — `auto-stop is armed now: every
+track is delivering audio` — because a track that starts late re-arms the check.
+
+**So to test auto-stop, play something for a few seconds first and then go
+quiet.** A render endpoint nothing has opened delivers no packets at all, so
+"say nothing, play nothing" disarms the check by design and the recording runs
+to full duration. That reads as the feature being broken and it is the feature
+working. True on any freshly booted machine, not only one whose tap is
+misbehaving.
+
+**And check the threshold against your own room.** A microphone floor above
+`thresholdDBFS` means a silent room never counts as quiet, and auto-stop can
+never fire at all. One Mac measured -27.9 dBFS with nobody in the room, 17 dB
+above the -45 default. The per-segment peaks in `minutes list` are where to read
+your floor from.
 
 On Windows the tray raises a dialog, its icon goes grey, and its menu becomes
 **Start recording**. Clicking that resumes **the same meeting**:
@@ -497,6 +513,11 @@ Configure at `~/.config/minutes/config.json` (override the path with
 |---|---|
 | `silence.stopAfterSeconds` | stop the recording after this many seconds with **every** track quiet. `0`, the default, never stops. |
 | `silence.thresholdDBFS` | what counts as quiet, e.g. `-45`. Blank uses the default. Read your room's floor from the per-segment peaks in `minutes list`. |
+
+`minutes config unset KEY` returns a setting to unset, which is **not** the same
+as setting it to the default value — the display prints `(default)` rather than
+a number, and without `unset` the only way back across that line is editing the
+JSON by hand.
 | `backend` | `local-whisper` (default) or `openai`. Naming a hosted backend is the act that lets audio leave. |
 | `model` | Whisper size locally (`tiny`…`large-v3`), or an API model name. |
 | `language` | Skips language detection. Leave empty to detect. |

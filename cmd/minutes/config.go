@@ -31,13 +31,22 @@ type setting struct {
 	get func(*config.Config) string
 	// set validates and applies. It returns a message when the change deserves
 	// one beyond "ok".
-	set  func(*config.Config, string) (string, error)
-	help string
+	set func(*config.Config, string) (string, error)
+	// clear returns the setting to unset — which is a different state from
+	// setting it to the default VALUE, and the display already draws that
+	// distinction by printing "(default)". Without this the line is one-way:
+	// minutes-mac had to hand-edit config.json to undo a probe, which is the
+	// exact edit a CLI exists to prevent, and it was holding a silence
+	// threshold 25 dB looser than default on a machine with no way to resume a
+	// recording it stopped.
+	clear func(*config.Config)
+	help  string
 }
 
 func boolSetting(get func(*config.Config) *bool, help string) setting {
 	return setting{
-		get: func(c *config.Config) string { return strconv.FormatBool(*get(c)) },
+		clear: func(c *config.Config) { *get(c) = false },
+		get:   func(c *config.Config) string { return strconv.FormatBool(*get(c)) },
 		set: func(c *config.Config, v string) (string, error) {
 			b, err := strconv.ParseBool(v)
 			if err != nil {
@@ -52,7 +61,8 @@ func boolSetting(get func(*config.Config) *bool, help string) setting {
 
 func intSetting(get func(*config.Config) *int, help string) setting {
 	return setting{
-		get: func(c *config.Config) string { return strconv.Itoa(*get(c)) },
+		clear: func(c *config.Config) { *get(c) = 0 },
+		get:   func(c *config.Config) string { return strconv.Itoa(*get(c)) },
 		set: func(c *config.Config, v string) (string, error) {
 			n, err := strconv.Atoi(v)
 			if err != nil || n < 0 {
@@ -67,6 +77,7 @@ func intSetting(get func(*config.Config) *int, help string) setting {
 
 func floatSetting(get func(*config.Config) *float64, help string) setting {
 	return setting{
+		clear: func(c *config.Config) { *get(c) = 0 },
 		get: func(c *config.Config) string {
 			if v := *get(c); v != 0 {
 				return strconv.FormatFloat(v, 'g', -1, 64)
@@ -92,9 +103,10 @@ func floatSetting(get func(*config.Config) *float64, help string) setting {
 
 func stringSetting(get func(*config.Config) *string, help string) setting {
 	return setting{
-		get:  func(c *config.Config) string { return *get(c) },
-		set:  func(c *config.Config, v string) (string, error) { *get(c) = v; return "", nil },
-		help: help,
+		clear: func(c *config.Config) { *get(c) = "" },
+		get:   func(c *config.Config) string { return *get(c) },
+		set:   func(c *config.Config, v string) (string, error) { *get(c) = v; return "", nil },
+		help:  help,
 	}
 }
 
@@ -167,6 +179,63 @@ func nearest(key string, keys []string) []string {
 	return out
 }
 
+// configUnset returns a setting to its unset state.
+//
+// Not the same as setting it to the default value, and the config display
+// already says so — it prints "(default)" rather than the number. A tool that
+// draws that distinction and then offers no way back across it leaves
+// hand-editing JSON as the only route, which is what a CLI exists to prevent.
+func configUnset(args []string, all map[string]setting, keys []string) int {
+	if len(args) == 1 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Println("keys:")
+		for _, k := range keys {
+			fmt.Printf("  %-30s %s\n", k, all[k].help)
+		}
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintf(os.Stderr, "usage: minutes config unset KEY\n")
+		return 2
+	}
+	key := args[0]
+	s, ok := all[key]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "no such setting %q\n", key)
+		if near := nearest(key, keys); len(near) > 0 {
+			fmt.Fprintf(os.Stderr, "did you mean:\n")
+			for _, k := range near {
+				fmt.Fprintf(os.Stderr, "  %s\n", k)
+			}
+		}
+		return 2
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	before := s.get(cfg)
+	s.clear(cfg)
+	after := s.get(cfg)
+
+	path := config.Path()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		fmt.Fprintf(os.Stderr, "creating %s: %v\n", filepath.Dir(path), err)
+		return 1
+	}
+	body, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
+		return 1
+	}
+	if err := os.WriteFile(path, append(body, '\n'), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "writing %s: %v\n", path, err)
+		return 1
+	}
+	fmt.Printf("%s: %s → %s\n", key, before, after)
+	return 0
+}
+
 func cmdConfig(args []string) int {
 	all := settings()
 	keys := make([]string, 0, len(all))
@@ -178,8 +247,12 @@ func cmdConfig(args []string) int {
 	if len(args) > 0 && args[0] == "set" {
 		return configSet(args[1:], all, keys)
 	}
+	if len(args) > 0 && args[0] == "unset" {
+		return configUnset(args[1:], all, keys)
+	}
 	if len(args) > 0 && args[0] != "--json" {
-		fmt.Fprintf(os.Stderr, "usage: minutes config [--json] | minutes config set KEY VALUE\n")
+		fmt.Fprintf(os.Stderr, "usage: minutes config [--json] | minutes config set KEY VALUE"+
+			" | minutes config unset KEY\n")
 		return 2
 	}
 

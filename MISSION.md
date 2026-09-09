@@ -1,23 +1,24 @@
 # Records both sides of a desktop meeting, transcribes it, and hands a session the material to write notes from.
 status: active
 owner: minutes-mac
-updated: 2026-08-31
+updated: 2026-09-09
 
 ## Now
-Paused mid-flight by the usage limit and assessing rather than working. A
-recording is live right now with its system track dead since 14:21 and its
-microphone still writing, which is the exact failure this project exists to
-refuse, happening while nobody was watching.
+Auto-stop on silence is built, installed on both nodes and proven to stop and
+complete on darwin. Every defect in it was in what it told the operator rather
+than what it did, and all three were found on the other machine.
 
 ## Waiting on
-- you: system track dead 41 min into a LIVE recording · mic still going, far end not captured · look now
-- you: rotate the root password · live, and public in git history at 77265e4 · rotate, then decide on a rewrite
-- you: installed binary is 37 commits stale · the pid and preflight fixes are absent · `make install`
-- devops: the 97-min Jeff+Jagan meeting is undelivered · 731 lines nobody has read · `minutes deliver`
+- mac: auto-stop verified on darwin, no hang · resume itself is still untested anywhere · needs a Windows run
+- you: 2026-08-27 standup filed to devops missing your side · it does not say so · re-send or amend it
 - nobody: afterStop did not fire on a 97-min recording · silent, looks exactly like success · undiagnosed
 - nobody: macOS system tap holds a sticky dead mode · 7 leads eliminated, no trigger · needs the physical Mac
 
 ## Log
+- 2026-09-09 all 8 recordings deleted at Alex's word, 38 GB freed; the root password was handled by him. ~/minutes/transcripts survives and is not a recording directory.
+- 2026-09-09 auto-stop on silence shipped: stops when EVERY track is quiet, off unless configured, and resumes into the SAME recording so one meeting stays one transcript. Building it found that the resume would have truncated the segment it resumed into.
+- 2026-09-09 three ways it lied to the operator, all found by minutes-mac on the Mac: a disarm notice falsified by its own recording, a duration renderer that contradicted the configured value, and a config that could be set but not unset. The last one held a threshold 25 dB loose on a machine with no resume button.
+- 2026-09-09 the staleness guard could never go quiet once v0.1.0 was tagged: it compared `describe --tags` output against `rev-parse --short`. Right for eight days, then unfalsifiable.
 - 2026-08-31 a LIVE recording has had no system audio since 14:21 while the mic keeps writing: 24 mic segments against 14 system, process and helper both alive, marker present. One side of a meeting, in progress, with nothing saying so. Not diagnosed and not touched — assessment only.
 - 2026-08-31 `afterStop` did not fire on the 97-minute Jeff+Jagan recording (wsl). Stopped cleanly, no error, both tracks complete, transcription never started and nothing reported it. Ran by hand afterwards and it worked. Observed on the INSTALLED binary, 17bde87 of 2026-08-29 — 37 commits behind master — so the first diagnostic step is establishing which version it reproduces on.
 - 2026-08-31 the staleness guard has been warning for two days and exits 0, so `make test` prints it and passes. It works exactly as built and nobody acted on it, including me: I reported the binary as "one commit behind, on purpose" when it was 37.

@@ -565,7 +565,7 @@ func recordWithResume(ctx context.Context, base capture.Options, cfg *config.Con
 		opt.SilenceThresholdDBFS = cfg.Silence.ThresholdDBFS
 		opt.OnSilence = func(since time.Duration) {
 			quiet.Store(true)
-			log("no sound on either track for %s — stopping the recording.", roughly(since.Seconds()))
+			log("no sound on either track for %s — stopping the recording.", exactly(since.Seconds()))
 			endRun()
 		}
 
@@ -579,7 +579,7 @@ func recordWithResume(ctx context.Context, base capture.Options, cfg *config.Con
 		// disk and in the manifest; the question is only whether the meeting is
 		// over.
 		reason := fmt.Sprintf("Nothing was heard for %s, so recording stopped. "+
-			"Click Start recording to carry on with the same meeting.", roughly(after.Seconds()))
+			"Click Start recording to carry on with the same meeting.", exactly(after.Seconds()))
 		// Recorded before waiting, not after resuming. A pause that is never
 		// resumed is still a pause, and a recording that ends here should say
 		// it stopped on silence rather than that somebody stopped it.
@@ -735,6 +735,29 @@ func transcribeSeconds(recordingSeconds float64) float64 {
 }
 
 // roughly renders a duration for a person waiting on it.
+// exactly renders a duration the operator configured, so what they read can be
+// checked against what they set.
+//
+// roughly() floors everything under 90 seconds to "a minute", which is right for
+// a transcription estimate and wrong here: somebody who sets
+// silence.stopAfterSeconds to 20, waits twenty seconds and is told "no sound for
+// a minute" reads it as the setting having been ignored. Found by minutes-mac,
+// who went looking for a miscounted duration and correctly found the rendering
+// instead.
+func exactly(seconds float64) string {
+	s := int(seconds + 0.5)
+	switch {
+	case s < 60:
+		return fmt.Sprintf("%ds", s)
+	case s < 3600 && s%60 == 0:
+		return fmt.Sprintf("%dm", s/60)
+	case s < 3600:
+		return fmt.Sprintf("%dm %ds", s/60, s%60)
+	default:
+		return fmt.Sprintf("%dh %dm", s/3600, (s%3600)/60)
+	}
+}
+
 func roughly(seconds float64) string {
 	switch {
 	case seconds < 90:

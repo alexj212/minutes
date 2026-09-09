@@ -124,6 +124,61 @@ endpoint — an in-person meeting captured on the microphone alone — auto-stop
 never fires. That is the safe direction and it is visible rather than silent,
 which is the whole difference between this and the five defects above it.
 
+### ~~Three ways auto-stop told the operator something untrue~~ — fixed, all found on the other node
+
+The feature worked on the first run on darwin. Every defect in it was in what it
+*said*, which is the half a unit test does not read.
+
+**The disarm notice was falsified by the recording that printed it.** *"…there
+is nothing to call quiet. The recording will run until it is stopped."* A track
+that starts late re-arms the check, and minutes-mac watched one recording print
+that line and then auto-stop anyway. The behaviour was right; the sentence was a
+promise about the future that the loop cannot keep. It now says only what is
+true at the time — *"auto-stop cannot fire yet"* — and **retracts itself where
+it was said** when the track turns up. Pinned by a test with a two-phase helper,
+because a single-phase one cannot reach the state.
+
+**`roughly()` contradicted the setting the operator had just typed.** It floors
+everything under ninety seconds to *"a minute"*, so somebody who sets
+`stopAfterSeconds 20`, waits twenty seconds, and is told *"no sound on either
+track for a minute"* reads it as the setting having been ignored. Found by
+minutes-mac going to look for a miscounted duration and correctly finding the
+rendering instead. `roughly()` is right where it was written for — a
+transcription estimate — so the silence messages use an exact renderer and it is
+left alone.
+
+**And the config could be set but not unset.** `thresholdDBFS` displays
+`(default)` rather than `-45`, so the tool already knew unset and
+set-to-the-default-value were different states, and offered no way back across
+the line. Undoing a probe meant hand-editing `config.json`, which is the edit a
+CLI exists to prevent.
+
+That bit a safety case rather than a cosmetic one: the probe needed the
+threshold 25 dB looser than default to fire against that room's -27.9 dBFS
+microphone floor, on a machine with **no indicator to resume from**. Left in
+place it would stop a real meeting at twenty seconds while somebody talked
+quietly, with no button to carry on. It was fully restored only because somebody
+was willing to edit JSON. `minutes config unset KEY` closes it.
+
+### The auto-stop test recipe could not test auto-stop
+
+Not a defect in the code — a hole in the instructions I wrote, and it produced
+exactly the wrong answer.
+
+The recipe said *"say nothing, play nothing"*. A render endpoint that nothing
+has opened delivers no packets at all — which this repo documents — so the
+system track sits at `segments: null`, the disarm fires **by design**, and the
+recording runs to full duration. An operator following those steps reads that as
+the feature not working, or reports a non-stop as the hang I had specifically
+asked to be told about. minutes-mac ran it, got exactly that, and did not report
+it as a hang.
+
+The missing step is one line: **wake the tap with audio first, then go quiet.**
+
+Latent on Windows too, and only invisible there because something is usually
+playing. On a freshly booted machine the endpoint is idle and the recipe has the
+same hole.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing

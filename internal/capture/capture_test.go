@@ -345,6 +345,30 @@ func streamingHelper(t *testing.T, info, packet []byte, times int, delay string)
 	return script
 }
 
+// twoPhaseHelper emits the track info, then `firstN` copies of one packet set,
+// then `secondN` of another — a capture where one track starts late.
+func twoPhaseHelper(t *testing.T, info, first []byte, firstN int, second []byte, secondN int, delay string) string {
+	t.Helper()
+	dir := t.TempDir()
+	w := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	script := filepath.Join(dir, "two-phase-helper")
+	body := fmt.Sprintf("#!/bin/sh\ncat %q\n"+
+		"i=0; while [ $i -lt %d ]; do cat %q; sleep %s; i=$((i+1)); done\n"+
+		"i=0; while [ $i -lt %d ]; do cat %q; sleep %s; i=$((i+1)); done\n",
+		w("info.bin", info), firstN, w("first.bin", first), delay,
+		secondN, w("second.bin", second), delay)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return script
+}
+
 // pcm16At fills n samples at one amplitude, so a packet can be made
 // deliberately loud or deliberately quiet.
 func pcm16At(n int, amp int16) []byte {
@@ -475,11 +499,75 @@ func TestAutoStopDoesNotFireWhileATrackHasDeliveredNothing(t *testing.T) {
 	// is indistinguishable from one that is working and simply has not yet.
 	var said bool
 	for _, l := range logged {
-		if strings.Contains(l, "auto-stop is not armed") {
+		if strings.Contains(l, "auto-stop cannot fire yet") {
 			said = true
+		}
+		// And it must not promise anything about the future. A track that
+		// starts late re-arms the check, so "the recording will run until it is
+		// stopped" was a sentence this loop could not keep — minutes-mac
+		// watched one recording print it and then auto-stop anyway.
+		if strings.Contains(l, "will run until") {
+			t.Errorf("the disarm notice promises the recording will not stop: %q", l)
 		}
 	}
 	if !said {
-		t.Errorf("nothing said auto-stop was disarmed:\n%s", strings.Join(logged, "\n"))
+		t.Errorf("nothing said auto-stop could not fire:\n%s", strings.Join(logged, "\n"))
+	}
+}
+
+// A track that starts late re-arms the check, and the retraction has to be
+// said where the disarm was said.
+//
+// Observed on the Mac: one recording logged that auto-stop could not fire,
+// then the system track began delivering, then it auto-stopped. The behaviour
+// was right; the operator had been told otherwise and nothing took it back.
+func TestTheDisarmNoticeIsRetractedWhenTheTrackArrives(t *testing.T) {
+	info := buildFrame(frame.TypeTrackInfo, frame.TrackMic, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Mic"))
+	info = append(info, buildFrame(frame.TypeTrackInfo, frame.TrackSystem, 0, 0, 0,
+		trackInfoPayload(48000, 1, 16, 1, 2, "Speakers"))...)
+
+	// First the microphone alone — the system endpoint has not opened yet.
+	micOnly := buildFrame(frame.TypeAudio, frame.TrackMic, 1_000_000, 0, 0, pcm16At(240, 20))
+	// Then both, quietly, which is what should fire the check.
+	both := append(append([]byte{}, micOnly...),
+		buildFrame(frame.TypeAudio, frame.TrackSystem, 1_000_000, 0, 0, pcm16At(240, 20))...)
+
+	var mu sync.Mutex
+	var logged []string
+	fired := false
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	err := Run(ctx, Options{
+		Helper:       twoPhaseHelper(t, info, micOnly, 6, both, 12, "0.05"),
+		Manifest:     newManifest(t),
+		SilenceAfter: 150 * time.Millisecond,
+		Log: func(f string, a ...any) {
+			mu.Lock()
+			defer mu.Unlock()
+			logged = append(logged, fmt.Sprintf(f, a...))
+		},
+		OnSilence: func(time.Duration) {
+			mu.Lock()
+			defer mu.Unlock()
+			fired = true
+		},
+	})
+	if err != nil {
+		t.Fatalf("capture failed: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	all := strings.Join(logged, "\n")
+	if !strings.Contains(all, "cannot fire yet") {
+		t.Fatalf("never said it could not fire while the system track was absent:\n%s", all)
+	}
+	if !strings.Contains(all, "armed now") {
+		t.Errorf("the disarm notice was never retracted once the track arrived — "+
+			"the operator has been told the recording will not auto-stop, and it does:\n%s", all)
+	}
+	if !fired {
+		t.Errorf("auto-stop never fired after both tracks were delivering quietly:\n%s", all)
 	}
 }
