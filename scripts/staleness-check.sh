@@ -17,7 +17,7 @@ BIN="${1:-$HOME/bin/minutes}"
 json=$("$BIN" version --json 2>/dev/null) || exit 0
 installed=$(printf '%s' "$json" | sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' | head -1)
 built=$(printf '%s' "$json" | sed -n 's/.*"built": *"\([^"]*\)".*/\1/p' | head -1)
-head=$(git rev-parse --short HEAD 2>/dev/null || echo "")
+head=$(git describe --tags --always --dirty 2>/dev/null || echo "")
 
 stale=""
 case "$installed" in
