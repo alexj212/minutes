@@ -522,23 +522,25 @@ func (r *Result) Describe() string {
 // thousands of consecutive identical ones.
 //
 // It also has to be long enough that "no packets" means broken rather than
-// slow, and THAT WAS ESTABLISHED FOR THE MICROPHONE ONLY. Measured on the
-// target Mac: a working microphone produced its first packet, 75 audio frames
-// and 153 KB, well inside this window.
+// slow, and that is now measured for BOTH devices rather than one:
 //
-// The sentence that used to follow said "so a device that delivers nothing here
-// is not one that was still warming up" — a claim about every device, resting
-// on a measurement of one. The system tap is not a microphone: it is a process
-// tap read through a private aggregate, and this file already documents that
-// the aggregate's setup path can block in mach_msg rather than return. **Its
-// time to first packet has never been measured.**
+//	microphone   first packet well inside the window; 75 frames, 153 KB
+//	system tap   FIRST AUDIO FRAME AT 0.090 s, twice, tone playing
 //
-// That matters because minutes-mac has twice seen the two invocation paths
-// disagree at the same instant on the same machine: five direct
-// `--system-only` probes returning nothing while the orchestrator's own capture
-// took 884224 frames. A tap slower than 700 ms to its first packet would
-// produce exactly that, and this constant would be the variable. Unmeasured, so
-// unchanged — but no longer claimed to cover it.
+// The tap number is worth the line because it was assumed for months. This
+// comment used to reason from the microphone alone — "so a device that delivers
+// nothing here is not one that was still warming up" — which is a claim about
+// every device resting on a measurement of one, and the tap is not a
+// microphone: it is a process tap read through a private aggregate, on a setup
+// path this file documents as able to block in mach_msg rather than return.
+//
+// It was worth checking rather than reasoning about, because a tap slower than
+// this window would have explained the zero-byte `--system-only` probes seen on
+// darwin while the orchestrator captured fine. It does not: 90 ms is an eighth
+// of the way in, so the window is comfortable for the tap and a per-track value
+// would fix nothing. Measured by minutes-mac on 2026-09-09, in one run, by
+// timestamping frames on arrival — a latency rather than a rate, which is the
+// only shape of experiment the tap's bimodal fault cannot corrupt.
 const probeMillis = 700
 
 // probeVerdict is what a short live capture says about one track.

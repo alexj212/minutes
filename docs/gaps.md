@@ -179,6 +179,58 @@ Latent on Windows too, and only invisible there because something is usually
 playing. On a freshly booted machine the endpoint is idle and the recipe has the
 same hole.
 
+### The tap's start latency is 0.090 s, and that killed the only mechanism the two-path split ever had
+
+Recorded because a hypothesis dying in ten minutes is worth as much as one
+surviving, and because the shape of the experiment is the reusable part.
+
+`probeMillis = 700` was justified in a comment that measured a **microphone**
+and then concluded *"a device that delivers nothing here is not one that was
+still warming up"* — every device, on a measurement of one. The system tap is a
+process tap read through a private aggregate, on a setup path this repo already
+documents as able to block in `mach_msg`; its time to first packet had never
+been measured at all.
+
+That mattered because it was the first mechanism ever offered for the thing
+minutes-mac had recorded twice: five `--system-only` probes returning zero bytes
+while the orchestrator's own capture took 884224 frames, same machine, same
+minutes. A tap slower than 700 ms produces exactly that, with no mode-flipping
+required.
+
+**It is not that.** Measured in one run, tone playing:
+
+    TRACK_INFO at 0.079 s   first AUDIO at 0.090 s   865 frames
+
+An eighth of the way into the window, twice. The constant is comfortable for the
+tap, a per-track value would fix nothing, and start latency is dead as an
+explanation for anything here.
+
+**The experiment is the part to keep.** A modal fault makes every
+before-and-after meaningless — twenty of anything means nothing when the device
+holds a state across runs — so the question was reshaped from a rate into a
+*latency*, read off a single capture by timestamping frames on arrival. One run,
+no batches, and both possible answers informative. That is the only shape of
+experiment this fault cannot corrupt, and it turned an afternoon into ten
+minutes.
+
+**And it narrowed the finding that prompted it, against its author.** With
+`--system-only` demonstrably fine, minutes-mac withdrew *"the two invocation
+paths disagree as paths"*: what remains sayable is that preflight and the probe
+disagreed on two occasions, not that the paths differ. The likeliest reading is
+the boring one — the mode is the variable, and two readings taken minutes apart
+cannot tell a path difference from a flip. Their words: *"precisely the error
+your own bimodality note warns about, and which I have now made twice while
+quoting it."*
+
+So the two-path disagreement is back to having **no mechanism at all**, which is
+a worse position than it looked an hour ago and an honest one.
+
+One thing it does settle: the disarm state needs a track to deliver nothing for
+a while and then start, and a 90 ms latency cannot manufacture that. The
+late-by-13.8 s tap seen at 00:25 was real mode behaviour rather than an artifact
+of the probe window — so the auto-stop retraction being pinned only by a
+synthetic two-phase test stands on its own, and is not waiting on this.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
