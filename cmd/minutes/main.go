@@ -76,9 +76,26 @@ func parseFlags(fs *flag.FlagSet, args []string) []string {
 	}
 }
 
-func usage() {
-	fmt.Fprint(os.Stderr, `minutes — record both sides of a meeting
+// buildLine is one line saying which build this is, for the top of help.
+//
+// From describeVersion, the same source `minutes version` reads, so the two can
+// never disagree about what is installed. Worth having where people actually
+// look: on 2026-09-16 the installed binary turned out to be a two-week-old build
+// that something had silently put back, and the first symptom was a command
+// behaving like an old version of itself. Help is also what an unknown command
+// prints, which is exactly the moment a stale build is the likely explanation.
+func buildLine() string {
+	v := describeVersion()
+	line := "build " + v.Version
+	if v.Built != "" {
+		line += " · built " + v.Built
+	}
+	return line + " · " + v.Platform
+}
 
+func usage() {
+	fmt.Fprintf(os.Stderr, "minutes — record both sides of a meeting\n%s\n", buildLine())
+	fmt.Fprint(os.Stderr, `
   minutes version [--json]
         What this build is, and whether its capture helper is installed
         beside it. --json is the shape a publisher verifies against.

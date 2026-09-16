@@ -118,3 +118,18 @@ func TestAnnounceWritesThePidFileListLooksFor(t *testing.T) {
 		t.Errorf("unannounce left the pid file behind: %v", err)
 	}
 }
+
+// Help names the build from the same source `minutes version` reads.
+//
+// The point of the line is that it cannot disagree with `version`. A help text
+// that carried its own copy of the version would go stale the same way the
+// installed binary did — silently, and in the place people read it.
+func TestHelpReportsTheSameBuildAsVersion(t *testing.T) {
+	v := describeVersion()
+	line := buildLine()
+	for _, want := range []string{v.Version, v.Platform} {
+		if !strings.Contains(line, want) {
+			t.Errorf("help's build line %q does not carry %q, which `minutes version` reports", line, want)
+		}
+	}
+}
