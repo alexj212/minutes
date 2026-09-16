@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -601,4 +602,110 @@ func TestMicAdviceDoesNotAssertARemedyItCannotVerify(t *testing.T) {
 		t.Error("a far end that was probed and carries audio reads the same as one " +
 			"where nothing was playing — the operator cannot tell what still works")
 	}
+}
+
+// countingHelper answers the report and the system probe normally, and makes
+// the microphone probe deliver nothing for the first `fails` calls. It records
+// how many microphone probes ran, so a test can see whether it retried.
+func countingHelper(t *testing.T, report string, fails int, micGood, micBad, system []byte) (helper, counter string) {
+	t.Helper()
+	dir := t.TempDir()
+	w := func(name string, b []byte) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	counter = filepath.Join(dir, "mic-probes")
+	body := fmt.Sprintf("#!/bin/sh\ncase \"$*\" in\n"+
+		"  *--mic-only*)\n"+
+		"    n=$(cat %q 2>/dev/null || echo 0); n=$((n+1)); echo $n > %q\n"+
+		"    if [ $n -le %d ]; then cat %q; else cat %q; fi ;;\n"+
+		"  *--system-only*) cat %q ;;\n"+
+		"  *) cat %q ;;\n"+
+		"esac\n",
+		counter, counter, fails, w("bad.bin", micBad), w("good.bin", micGood),
+		w("sys.bin", system), w("report.json", []byte(report)))
+	helper = filepath.Join(dir, "counting-helper")
+	if err := os.WriteFile(helper, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return helper, counter
+}
+
+// A microphone that delivers nothing on the first probe after idle and fine on
+// the second must be recorded, and one that delivers nothing on both must not.
+//
+// Measured before this was written, on a USB camera microphone after 150 s
+// idle: the report's open followed by the probe gave first audio NEVER; the
+// same sequence again gave 0.294 s; the probe alone, cold, gave 0.346 s. Every
+// real refusal came through `minutes preflight`, first attempt refused and the
+// second fine — including the operator starting an insurance call.
+//
+// Asserted as a pair along the one axis that matters. The retry exists to fix
+// the first case, and the only way it could be harmful is by hiding the second.
+func TestAMicrophoneThatMissesOneProbeIsRetriedButADeadOneStillRefuses(t *testing.T) {
+	if !IsWSL() || !InteropEnabled() {
+		t.Skip("Run()'s helper path under test only applies on a WSL host with interop")
+	}
+	const report = `{
+  "platform": "windows",
+  "tracks": {
+    "microphone": {"ok": true, "mode": "wasapi-capture", "device": "Mic", "sampleRate": 48000, "channels": 1, "bitsPerSample": 16, "formatTag": 1},
+    "system": {"ok": true, "mode": "wasapi-loopback", "device": "Speakers", "sampleRate": 44100, "channels": 2, "bitsPerSample": 32, "formatTag": 3}
+  },
+  "ok": true
+}`
+	const (
+		typTrackInfo = 1
+		typAudio     = 2
+	)
+	micInfo := frameBytes(typTrackInfo, 0, micTrackInfo())
+	good := append(append([]byte{}, micInfo...), frameBytes(typAudio, 0, pcm(3, -2, 5, -1, 4))...)
+	nothing := append([]byte{}, micInfo...) // declared, never written to
+	sysLive := append(append([]byte{}, frameBytes(typTrackInfo, 1, micTrackInfo())...),
+		frameBytes(typAudio, 1, pcm(7, -3, 9, 2))...)
+
+	probes := func(counter string) string {
+		b, _ := os.ReadFile(counter)
+		return strings.TrimSpace(string(b))
+	}
+
+	t.Run("misses the first probe after idle, then delivers", func(t *testing.T) {
+		helper, counter := countingHelper(t, report, 1, good, nothing, sysLive)
+		t.Setenv("MINUTES_HELPER", helper)
+		res, err := Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !res.CanRecord {
+			t.Fatalf("refused a microphone that delivered on its second probe — the operator "+
+				"is told to fix a device that works, at the moment they start a call:\n%s", res.Refusal)
+		}
+		if res.Mic.Signal != SignalCarrying {
+			t.Errorf("Mic.Signal = %q, want %q", res.Mic.Signal, SignalCarrying)
+		}
+		if n := probes(counter); n != "2" {
+			t.Errorf("ran %s microphone probes, want 2", n)
+		}
+	})
+
+	t.Run("delivers nothing twice", func(t *testing.T) {
+		helper, counter := countingHelper(t, report, 99, good, nothing, sysLive)
+		t.Setenv("MINUTES_HELPER", helper)
+		res, err := Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if res.CanRecord {
+			t.Fatal("recorded with a microphone that delivered nothing on both probes — " +
+				"the retry is hiding a dead device, which is the one thing it must never do")
+		}
+		// Retried once, not until it gives up. A retry that loops turns a
+		// broken microphone into preflight hanging.
+		if n := probes(counter); n != "2" {
+			t.Errorf("ran %s microphone probes on a dead device, want exactly 2", n)
+		}
+	})
 }

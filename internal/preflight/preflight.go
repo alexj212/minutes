@@ -404,6 +404,35 @@ func runHelperPreflight(ctx context.Context, res *Result) (*Result, error) {
 		// refusal naming what does still work is a different message from one
 		// that only says no.
 		micV := probeTrack(ctx, helper, frame.TrackMic)
+		// One retry, and only for "no packets at all".
+		//
+		// Measured on the Windows machine with a USB camera microphone, after
+		// 150 seconds idle each time, varying one thing:
+		//
+		//	the report's open, then this probe   cold   first audio NEVER, 0 frames
+		//	the same again, immediately          warm   first audio 0.294 s
+		//	this probe ALONE, nothing before it  cold   first audio 0.346 s
+		//
+		// So neither coldness nor wake latency is the cause — a cold microphone
+		// probed on its own delivers in a third of a second. It takes a cold
+		// device AND the report's open immediately before this one. That is
+		// exactly the order preflight runs them in, which is why every real
+		// failure came through `minutes preflight`, three times with the same
+		// shape: first attempt refused, second fine. The operator was refused
+		// at the moment they were starting a call.
+		//
+		// Why that sequence starves the second open is not established, and
+		// this does not pretend to fix a cause it has not found.
+		//
+		// A retry cannot hide a dead microphone, which is the reason it is
+		// safe: a disconnected or silent device delivers nothing on both
+		// attempts and is still refused, one probe window later. It is limited
+		// to probeNoPackets on purpose. A constant signal — the denied macOS
+		// microphone returning zeros — is deterministic and a retry would only
+		// delay the refusal.
+		if micV == probeNoPackets {
+			micV = probeTrack(ctx, helper, frame.TrackMic)
+		}
 		res.Mic.Signal = signalOf(micV)
 		// The same measurement on the far end, reported and never enforced.
 		// `system ok` meant "the device opened" and was silent about whether
