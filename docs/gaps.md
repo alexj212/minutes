@@ -264,6 +264,43 @@ first" is satisfied by reading a filename. The two acceptable answers are
 "already filed, and I confirmed it is this meeting" and "not filed" — *probably
 filed* is neither.
 
+### ~~The first recording after the microphone went idle was refused~~ — fixed, and the cause is still unknown
+
+`minutes record --name "insurance call"` refused with *"the microphone declared
+its format and then delivered nothing"*, and worked on the next attempt. It was
+the third time with the identical shape, every one through `minutes preflight`,
+and it landed at the worst possible moment: an operator starting a call.
+
+The first experiment did not reproduce it. A cold microphone, probed once with a
+four-second window, delivered its first frame at 0.395 s. That was not evidence
+the failure was fast — it was evidence the experiment held the wrong thing
+constant. Preflight does not open the microphone once: it opens it for its
+report and then **immediately again** for the probe. Varying only that, 150 s
+idle each time:
+
+    the report's open, then the probe   cold   first audio NEVER, 0 frames
+    the same again, immediately         warm   first audio 0.294 s
+    the probe ALONE, nothing before it  cold   first audio 0.346 s
+
+So it is not coldness and not wake latency. It takes a cold device **and** an
+open immediately before, which is exactly preflight's order.
+
+**Why that starves the second open is not established**, and the fix does not
+depend on knowing. Preflight retries the microphone probe once when it delivers
+nothing at all. That cannot hide a dead device — nothing on both attempts is
+still refused — and it is not applied to a constant signal, which is
+deterministic.
+
+Verified live after installing: two rounds, 150 s idle each, the first
+`minutes preflight` of each round, both passed.
+
+**What that verification does not show is whether the retry fired.** The output
+cannot distinguish "the second probe rescued it" from "the first probe happened
+to work". Before the fix this exact condition failed four times out of four, so
+the retry doing the work is by far the likelier reading — but it is a reading.
+A retry that fires on every recording also means the device is marginal, and
+nothing currently tells the operator that.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
