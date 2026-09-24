@@ -301,6 +301,50 @@ the retry doing the work is by far the likelier reading — but it is a reading.
 A retry that fires on every recording also means the device is marginal, and
 nothing currently tells the operator that.
 
+### A USB microphone accepted a capture stream and sent nothing, and nothing anywhere said so
+
+The enumerate-versus-start failure this project was built to refuse, arriving on
+Windows on a physical device, and the refusal worked — but the message left the
+operator nowhere to go.
+
+`minutes record --name "insurance call"` refused. `Start()` returned `S_OK`, the
+endpoint reported 48000 Hz 2ch, and it delivered **zero packets for ten seconds
+at a stretch, six probes running**, with no error from any call, no `LOG` frame,
+empty stderr and exit 0. Windows reported the device healthy, microphone privacy
+`Allow`, and its own input level meter moved when the operator spoke.
+
+**Two wrong turns, both worth recording because each was a documented trap.**
+
+First, the microphone-in-use registry key. One app showed `LastUsedTimeStop = 0`
+and it was read as *in use now* — an app was closed on the strength of it. The
+start time was **six months old**, and 1 entry in 101 had that value: `0` there
+is "no stop was recorded", which is the same value for still-open and
+never-closed. The `systemctl Result` row in the guidance, exactly.
+
+Second, the probe ran the helper with `stderr` discarded. A possible failure
+message was being turned into an empty result, in a session diagnosing a device
+that reports nothing. Rerun with stderr kept, it was genuinely empty — but that
+was not known until it was looked at.
+
+**What settled it was a second consumer.** The only thing reporting was our own
+helper, and a tool that reports is not thereby the correct one. A standalone
+WASAPI probe sharing no code with it walked every active capture endpoint:
+
+    Microphone (2- Insta360 Link)   start=S_OK  packets=0    frames=0      <= DEFAULT
+    nine other endpoints            start=S_OK  packets=~97  frames=~46560
+
+The caveat was stated at the time and still stands: all nine working endpoints
+were virtual, and no second physical microphone was active to compare against.
+
+**Unplugging the device and plugging it back in fixed it** — 0 packets became 86
+in one second, and three consecutive preflights passed.
+
+The lasting change is the message. On Windows the refusal had **no remedy at
+all** — the macOS branch offered one and Windows fell through with nothing — so
+a correct refusal was a dead end. It now names the power-cycle that worked, and
+tells the operator to try another input, because one wedged endpoint and a
+broken capture path need different fixes and that is what separates them.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing

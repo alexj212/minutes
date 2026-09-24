@@ -649,6 +649,30 @@ func micAdvice(platform string, farEnd Signal) string {
 		b.WriteString("the far end and none of you.")
 	}
 	if platform != "macos" {
+		// Windows had no remedy here at all, which made a correct refusal a
+		// dead end: the operator was told the device delivers nothing and left
+		// to work out what to do about it.
+		//
+		// Measured on 2026-09-24. A USB camera microphone accepted a capture
+		// stream — Start() returned S_OK — and delivered zero packets for ten
+		// seconds at a stretch, across six probes, with no error from any call.
+		// Windows reported the device healthy and its own input level meter
+		// moved. An independent WASAPI probe sharing no code with the helper
+		// got nothing from that endpoint and a full second of audio from nine
+		// others on the same machine. Unplugging the device and plugging it
+		// back in fixed it immediately: 0 packets became 86 in one second.
+		//
+		// So the remedy named here is the one that worked, and the endpoint
+		// comparison is named with it because it is what separates "this device
+		// is wedged" from "capture is broken on this machine" — and the two
+		// need different actions.
+		b.WriteString("\n\n  The device accepted the stream and sent nothing, which a healthy one\n" +
+			"  does not do even in a silent room. On a USB microphone or camera this is\n" +
+			"  usually the device wedged rather than anything on this machine:\n" +
+			"  unplug it, plug it back in, and run this again.\n\n" +
+			"  If that does not fix it, check whether any OTHER input works — make one\n" +
+			"  the Windows default and re-run. One dead endpoint and one broken capture\n" +
+			"  path need different fixes, and that is what tells them apart.")
 		return b.String()
 	}
 	b.WriteString("\n\n  Start at System Settings > Privacy & Security > Microphone, and enable\n" +

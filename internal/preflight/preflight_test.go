@@ -592,9 +592,20 @@ func TestMicAdviceDoesNotAssertARemedyItCannotVerify(t *testing.T) {
 			t.Errorf("advice is missing %q — it names one cause confidently:\n%s", want, got)
 		}
 	}
-	// Not on Windows, where none of it applies.
-	if win := micAdvice("windows", SignalCarrying); strings.Contains(win, "System Settings") {
+	// Not on Windows, where none of it applies — but Windows must not be left
+	// with a refusal and no next step, which is what it had. The remedy named
+	// is the one that was measured to work: a wedged USB device, fixed by a
+	// power-cycle, told apart from a broken capture path by whether any other
+	// endpoint delivers.
+	win := micAdvice("windows", SignalCarrying)
+	if strings.Contains(win, "System Settings") {
 		t.Errorf("macOS advice is printed on Windows:\n%s", win)
+	}
+	for _, want := range []string{"unplug it", "OTHER input"} {
+		if !strings.Contains(win, want) {
+			t.Errorf("the Windows refusal is missing %q — a correct refusal with no "+
+				"remedy is a dead end:\n%s", want, win)
+		}
 	}
 	// And the far end's state is carried into it, differently for each answer.
 	a, b := micAdvice("windows", SignalCarrying), micAdvice("windows", SignalNone)
