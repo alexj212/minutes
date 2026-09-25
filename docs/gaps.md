@@ -345,6 +345,50 @@ a correct refusal was a dead end. It now names the power-cycle that worked, and
 tells the operator to try another input, because one wedged endpoint and a
 broken capture path need different fixes and that is what separates them.
 
+### ~~An upgrade silently downgraded this machine by 37 commits~~ — published, and the class is somebody else's
+
+On 09-11 the installed binary went backwards to a build from 08-29 and nothing
+said so. It was found five days later, and the only symptom was `preflight`
+printing remedy text this repo had replaced a week earlier — a command behaving
+like an older version of itself.
+
+**Traced rather than guessed.** The binary reported `built 2026-08-29T22:09:38Z`,
+so it was the August artifact copied, not a rebuild from an old checkout — and
+the August binaries in `~/bin` had already been overwritten on 09-09, so a copy
+had to exist elsewhere. `dist/release/` held exactly those three files at exactly
+the byte sizes that appeared in `~/bin`, and the coordinator's published sets
+explain the rest:
+
+    v0.1.0-17-gee5ec50   darwin/arm64   09-11 21:36   <- the Mac's set, published
+    17bde87              linux/amd64    08-29 18:09   <- newest linux set, still August
+
+**09-11 21:36 is the `~/bin` mtime to the minute.** Somebody published the Mac's
+release and ran an upgrade; this node asked for the newest set *for its own
+platform* and got August, because nobody had ever published a newer one.
+
+What is established: the byte sizes, the published sets, the timestamp match,
+and that `shabadoo upgrade --tool` installs another tool's release set. What is
+inferred: that the write came from an upgrade at that moment. The coordinator's
+command log is not visible from here.
+
+**The structural part is not ours to fix.** A release set is per-platform by
+necessity — the Windows helper needs MSVC over interop, the darwin one needs
+swiftc and a signing identity, and no host can build them all. But `upgrade`
+resolves *newest for this platform*, so publishing from one machine pushes the
+other **backwards**, and nothing in the path says the word downgrade. A node
+whose platform has not been published in a month is not upgraded, it is reverted.
+
+Closed here by publishing this machine's set, which makes the newest linux set
+today's build rather than August's. That fixes the instance. The class — an
+upgrade that moves a node backwards without saying so, and a fleet running two
+versions of one tool because each platform resolves separately — is shabadoo's,
+and is briefed rather than worked around.
+
+`scripts/staleness-check.sh` did catch it, and that is worth stating honestly: it
+warned for five days and nobody read it, because it only speaks to somebody
+already sitting in this repo with a terminal open. The operator hitting the stale
+binary was not.
+
 ### The system tap is intermittent, and intermittent is worse than dead
 
 **The worst open one.** *Dead is a thing you can bisect; intermittent is a thing
