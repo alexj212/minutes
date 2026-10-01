@@ -1,21 +1,26 @@
 # Records both sides of a desktop meeting, transcribes it, and hands a session the material to write notes from.
 status: active
 owner: minutes-mac
-updated: 2026-09-09
+updated: 2026-10-01
 
 ## Now
-Auto-stop on silence is built, installed on both nodes and proven to stop and
-complete on darwin. Every defect in it was in what it told the operator rather
-than what it did, and all three were found on the other machine.
+In daily use on Windows and recording real meetings. The last three defects were
+all found by other sessions hitting them in the wild rather than by the tests,
+and all three were the same shape: the tool knew something and did not say it.
 
 ## Waiting on
-- mac: auto-stop verified on darwin, no hang · resume itself is still untested anywhere · needs a Windows run
-- you: 2026-08-27 standup filed to devops missing your side · it does not say so · re-send or amend it
-- nobody: afterStop did not fire on a 97-min recording · silent, looks exactly like success · undiagnosed
+- you: `upgrade --tool` refuse-vs-warn on a downgrade · a silent revert stays unreportable · one decision, then a patch
+- you: auto-stop armed at 900s but CANNOT fire · room peak -21 dBFS against a -45 threshold · set thresholdDBFS
+- nobody: resume has never run on any machine · the hazard is losing a meeting's first half · one Windows run
 - nobody: macOS system tap holds a sticky dead mode · 7 leads eliminated, no trigger · needs the physical Mac
-- alex: **`upgrade --tool` refuse-vs-warn** — shabadoo confirmed both findings in code (2026-09-24, relayed via wsl) and the fix is cheap, but which way it fails is a judgement nobody else can make · risk of not: a silent downgrade stays unreportable · cost: one decision, then a small patch
+- nobody: the staleness guard only speaks inside the repo · it warned 5 days unread · needs another surface
 
 ## Log
+- 2026-10-01 auto-stop armed on wsl at 900s by the core session, and measured inert: this room's mic PEAK floor is -19.8..-23.0 dBFS across four samples, 24 dB above the -45 default threshold, so no stretch is ever "quiet". Real speech peaks -2.7 dBFS in an 11-segment meeting, so a threshold near -12 is what separates them here. The Mac measured -27.9 dBFS on 09-16 — both rooms sit well above the shipped default, which is evidence for changing these two configs rather than for changing the default on two samples from one fleet.
+- 2026-10-01 afterStop never transcribed anything started with `minutes record`: `minutes stop` sends SIGTERM, which cancels the context that ENDS capture, and that cancelled context was handed to transcription — `exec.CommandContext` then never launches whisper. Stopping the recording was what stopped it being transcribed. Fixed at 5a36e1c; `list` and `status` now distinguish done / FAILED / none-yet / in-progress (afc90f6).
+- 2026-10-01 the bug ate a real 54-minute meeting the same morning. Recovered by hand to 298 lines and delivered; devops filed notes and knowledge at 4b04d5d, resolved a mis-transcribed module name that would have invented `tradestocker`, and found a credential spoken in clear that no keyword scan would have caught. Alex deprioritised the rotation; the recording is deleted.
+- 2026-09-24 the 09-11 binary revert was `upgrade --tool` resolving "newest for this platform": publishing the Mac's set pushed this node BACK 37 commits, because no newer linux set had ever been published. Closed by publishing; the class is shabadoo's.
+- 2026-09-24 a USB microphone accepted a capture stream and sent nothing for ten seconds at a time, with Start() returning S_OK and Windows reporting the device healthy. An independent WASAPI probe got 0 packets from it and ~46560 frames/s from nine other endpoints. A replug fixed it; the Windows refusal now names that remedy, which it previously had none of.
 
 - 2026-09-24 **shabadoo confirmed both `upgrade --tool` findings in its own code, and finding 1 is stronger than this project claimed.** Relayed by `wsl` because a direct send could not be delivered — see the entry below. We called the downgrade mechanism *"the obvious reading, not a measurement"*; the code makes it **structural**: `installToolOnNodes` (`tool.go:128`) never asks the node what version it currently has, so a backwards move is not merely unreported but **unreportable** — there is no value in that function that could have said so. `upgradeOne`, for shabadoo's own binary, does compare before/after. Finding 2 confirmed too: nothing aggregates a tool's version across nodes, so a fleet split is invisible by construction. **Our 21:55 publish was corroborated independently of our own output** — three `release.publish` rows for `v0.1.0-22-g4c04d3e` linux/amd64 in the coordinator's audit log.
 - 2026-09-24 **the 09-11 mechanism is NOT confirmed, and the reason is a measurement trap of exactly our own class.** The action *is* audited (`node.install_tool`), but `/api/audit` reaches back only to 09-14 11:59, so the event is past the window and **absence there is not evidence**. Worse: `AuditTail` treats `limit > 1000` as **UNSET** and falls back to 100, so a `limit=5000` query silently returned today only. shabadoo says that had they stopped there they would have reported no record — *our* failure class, inside the tool used to investigate *our* report. A cheap fix exists for the downgrade gap: `verifyBinary` already runs `version --json` on the staged binary and each outgoing component is already renamed `.prev`, so reading the outgoing file with that helper before the swap gives version **and** `built` for free — and `built` is orderable where `git describe` is not, the same trick shabadoo's own downgrade guard uses. Not built: it needs a refuse-vs-warn decision, which is Alex's.
