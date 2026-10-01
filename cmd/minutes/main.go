@@ -814,7 +814,22 @@ func cmdStatus(args []string) int {
 	}
 	fmt.Println()
 	fmt.Printf("  since: %s\n", st.StartedAt.Format(time.RFC3339))
-	fmt.Printf("  files: %s\n\n", st.Dir())
+	fmt.Printf("  files: %s\n", st.Dir())
+	// Three answers, the same three `minutes list` distinguishes. `status` said
+	// nothing at all about the transcript, so the one command somebody runs to
+	// ask "what happened to my meeting" could not answer it.
+	switch {
+	case st.Transcript != nil:
+		fmt.Printf("  transcript: %d lines\n", st.Transcript.Lines)
+	case st.TranscribeFailed != nil:
+		fmt.Printf("  transcript: FAILED — %s\n", st.TranscribeFailed.Reason)
+		fmt.Printf("              the audio is intact; `minutes transcribe %s` retries it\n", st.ID)
+	case st.State == manifest.StateTranscribing:
+		fmt.Printf("  transcript: in progress\n")
+	default:
+		fmt.Printf("  transcript: none yet\n")
+	}
+	fmt.Println()
 	if st.Interrupted() {
 		fmt.Println("  This recording was interrupted: the manifest says it is running,")
 		fmt.Println("  but no supervisor is. Completed segments below are intact.")
