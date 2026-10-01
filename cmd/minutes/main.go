@@ -850,6 +850,7 @@ func cmdList(args []string) int {
 		idWidth, "ID", "STATE", "LENGTH", "SIZE", "TRANSCRIPT", "DELIVERED")
 
 	var total int64
+	var failed bool
 	for _, st := range all {
 		mark := " "
 		if st.Live {
@@ -858,13 +859,20 @@ func cmdList(args []string) int {
 		size, _ := session.DirSize(st.Dir())
 		total += size
 
+		// Three answers, not two. "—" used to cover never-attempted, failed and
+		// in-progress alike, which is how a 67-minute meeting sat un-transcribed
+		// for half an hour with the listing saying nothing was wrong.
 		transcribed := "—"
-		if t := st.Transcript; t != nil {
-			transcribed = fmt.Sprintf("%d lines", t.Lines)
-			if t.AudioLeftMachine {
+		switch {
+		case st.Transcript != nil:
+			transcribed = fmt.Sprintf("%d lines", st.Transcript.Lines)
+			if st.Transcript.AudioLeftMachine {
 				// Worth seeing at a glance which meetings left the machine.
 				transcribed += " ↑"
 			}
+		case st.TranscribeFailed != nil:
+			transcribed = "FAILED"
+			failed = true
 		}
 		delivered := "—"
 		if d := st.Delivery; d != nil {
@@ -884,6 +892,10 @@ func cmdList(args []string) int {
 		}
 	}
 	fmt.Printf("\n  %d recording(s), %s in %s\n", len(all), session.HumanBytes(total), *root)
+	if failed {
+		fmt.Printf("  FAILED means an automatic transcription did not produce a transcript.\n" +
+			"  The audio is intact; `minutes transcribe <id>` retries it and says why.\n")
+	}
 	for _, st := range all {
 		if st.Transcript != nil && st.Transcript.AudioLeftMachine {
 			fmt.Printf("  ↑ marks a meeting whose audio was sent off this machine.\n")
@@ -1191,16 +1203,55 @@ func cmdRecord(args []string) int {
 	if cfg, err := config.Load(); err != nil {
 		fmt.Fprintf(os.Stderr, "  config unreadable, not transcribing: %v\n", err)
 	} else if cfg.Transcription.AfterStop {
+		// A FRESH signal context, and this is the whole of the bug the wsl
+		// session reported on 2026-09-29.
+		//
+		// `ctx` is cancelled by the act of stopping — `minutes stop` sends
+		// SIGTERM, and Ctrl-C does the same — which is how capture ends. Handing
+		// that same context to transcription hands it one that is already
+		// cancelled, and `exec.CommandContext` then never starts whisper at all:
+		// measured, `output="" err=context canceled`. So stopping the recording
+		// was the thing that prevented it being transcribed, on every recording
+		// made with `minutes record`. The detached supervisor was unaffected
+		// because it passes context.Background().
+		//
+		// Not Background() here, though, because the line printed below offers
+		// Ctrl-C as a way to leave the transcript for later, and that has to keep
+		// working. A new handler, installed before the recording's is released so
+		// there is no window where a signal would kill the process outright.
+		tctx, tstop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer tstop()
+		stop()
+
+		// The state moves before the work starts, the same way the supervisor
+		// does it. Without this `minutes list` never said "transcribing" even
+		// when it was, so a queued transcript and one that was never going to
+		// arrive looked identical.
+		if err := m.SetState(manifest.StateTranscribing); err != nil {
+			fmt.Fprintf(os.Stderr, "  writing manifest: %v\n", err)
+		}
 		fmt.Printf("\n  transcribing — about %s. Ctrl-C to leave it for `minutes transcribe` later.\n\n",
 			roughly(transcribeSeconds(m.Duration())))
 		log := func(f string, a ...any) { fmt.Printf("  "+f+"\n", a...) }
-		if err := transcribeInto(ctx, m, cfg, log); err != nil {
-			fmt.Fprintf(os.Stderr, "  transcription failed (the recording is intact): %v\n", err)
+		terr := transcribeInto(tctx, m, cfg, log)
+		if serr := m.SetState(manifest.StateStopped); serr != nil {
+			fmt.Fprintf(os.Stderr, "  writing manifest: %v\n", serr)
+		}
+		if terr != nil {
+			// Recorded, not just printed. This message goes to the terminal the
+			// recording was started in, and `minutes record` writes no
+			// recorder.log — so when the operator stops a meeting from another
+			// window, as they do, nothing survives for them to read.
+			if serr := m.SetTranscribeFailed(terr.Error()); serr != nil {
+				fmt.Fprintf(os.Stderr, "  writing manifest: %v\n", serr)
+			}
+			fmt.Fprintf(os.Stderr, "  transcription failed (the recording is intact): %v\n", terr)
+			fmt.Fprintf(os.Stderr, "  `minutes list` will show this as FAILED; `minutes transcribe %s` retries it.\n", m.ID)
 		} else {
 			if t, lerr := transcript.Load(m.Dir()); lerr == nil {
 				fmt.Printf("\n  %d lines -> %s\n", len(t.Lines), filepath.Join(m.Dir(), transcript.TextName))
 			}
-			autoDeliver(ctx, m, cfg, log)
+			autoDeliver(tctx, m, cfg, log)
 		}
 	}
 	return rc

@@ -250,6 +250,9 @@ type Manifest struct {
 
 	// Transcript records that this recording has been transcribed, and how.
 	Transcript *TranscriptRecord `json:"transcript,omitempty"`
+	// TranscribeFailed records an automatic transcription that did not produce
+	// a transcript. Cleared when one finally does.
+	TranscribeFailed *TranscribeFailure `json:"transcribeFailed,omitempty"`
 
 	// App names the process captured instead of the whole machine, if one was
 	// targeted. Empty means system-wide, which takes everything that played.
@@ -480,6 +483,19 @@ type TranscriptRecord struct {
 	File             string    `json:"file"`
 }
 
+// TranscribeFailure is why an automatic transcription produced no transcript.
+//
+// A pointer, so nil means "nothing recorded" rather than a zero-valued failure
+// that reads as one. Without this the TRANSCRIPT column showed "—" for three
+// different things — never attempted, attempted and failed, and in progress —
+// and the operator could not tell a queued transcript from one that was never
+// going to arrive. Reported by the wsl session after a 67-minute meeting sat
+// un-transcribed for half an hour with nothing anywhere saying why.
+type TranscribeFailure struct {
+	At     time.Time `json:"at"`
+	Reason string    `json:"reason"`
+}
+
 // DeliveryRecord is where a recording's notes were sent.
 type DeliveryRecord struct {
 	To string    `json:"to"`
@@ -487,6 +503,16 @@ type DeliveryRecord struct {
 	// Degraded means the agent was unreachable and the brief was written to
 	// disk instead. It is not the same as delivered, and should not look it.
 	Degraded bool `json:"degraded,omitempty"`
+}
+
+// SetTranscribeFailed records that an automatic transcription did not produce a
+// transcript, so `minutes list` can say so.
+func (m *Manifest) SetTranscribeFailed(reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := time.Now()
+	m.TranscribeFailed = &TranscribeFailure{At: now, Reason: reason}
+	return m.saveLocked()
 }
 
 // SetDeliveryHeld records why an automatic delivery did not happen.
@@ -541,6 +567,10 @@ func (m *Manifest) SetTranscript(r TranscriptRecord) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Transcript = &r
+	// A transcript that now exists settles the question, so an earlier failure
+	// stops being reported. Leaving it would make `minutes list` keep saying
+	// FAILED about a recording that has a transcript sitting next to it.
+	m.TranscribeFailed = nil
 	return m.saveLocked()
 }
 

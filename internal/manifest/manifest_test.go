@@ -321,3 +321,57 @@ func TestConstantIsNotTheSameAsQuiet(t *testing.T) {
 		t.Error("a track with one live segment was reported as constant throughout")
 	}
 }
+
+// Three answers about a transcript, not two — and a later success must retract
+// an earlier failure.
+//
+// "—" in `minutes list` used to cover never-attempted, failed and in-progress
+// alike, which is how a 67-minute meeting sat un-transcribed for half an hour
+// with the listing reporting nothing wrong. The pair that matters is a recording
+// nobody tried to transcribe against one where the attempt failed: those must
+// not look the same, and a FAILED that survives a successful retry is the same
+// defect pointing the other way.
+func TestAFailedTranscriptionIsDistinctFromNeverHavingTried(t *testing.T) {
+	m := New(t.TempDir(), "2026-10-01-120000-probe", "probe", 300)
+
+	if m.Transcript != nil || m.TranscribeFailed != nil {
+		t.Fatal("a fresh recording claims something about transcription")
+	}
+
+	if err := m.SetTranscribeFailed("context canceled"); err != nil {
+		t.Fatal(err)
+	}
+	if m.TranscribeFailed == nil {
+		t.Fatal("the failure was not recorded")
+	}
+	if m.TranscribeFailed.Reason != "context canceled" {
+		t.Errorf("reason = %q, want the error text", m.TranscribeFailed.Reason)
+	}
+	if m.Transcript != nil {
+		t.Error("a failure invented a transcript")
+	}
+
+	// A retry that works settles it. Leaving the failure would make the listing
+	// keep saying FAILED about a recording with a transcript beside it.
+	if err := m.SetTranscript(TranscriptRecord{Backend: "local-whisper", Lines: 465}); err != nil {
+		t.Fatal(err)
+	}
+	if m.TranscribeFailed != nil {
+		t.Errorf("a successful transcript left the old failure in place: %+v", m.TranscribeFailed)
+	}
+	if m.Transcript == nil || m.Transcript.Lines != 465 {
+		t.Error("the transcript was not recorded")
+	}
+
+	// And it survives a round trip, because the listing reads it from disk.
+	reloaded, err := Load(m.Dir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reloaded.TranscribeFailed != nil {
+		t.Error("the cleared failure came back from disk")
+	}
+	if reloaded.Transcript == nil || reloaded.Transcript.Lines != 465 {
+		t.Error("the transcript did not survive the round trip")
+	}
+}
